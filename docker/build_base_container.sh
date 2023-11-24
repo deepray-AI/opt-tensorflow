@@ -9,6 +9,7 @@ OS_VERSION=${4:-"20.04"}
 
 docker build \
     -f base_container.Dockerfile \
+    --network=host \
     --build-arg CUDA_VERSION=${CUDA_VERSION} \
     --build-arg TF_VERSION=${TF_VERSION} \
     --build-arg PY_VERSION=${PY_VERSION} \
