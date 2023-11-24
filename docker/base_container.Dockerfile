@@ -39,6 +39,11 @@ RUN bash /install_deps/clang-format.sh
 RUN bash /install_deps/install_bazelisk.sh
 RUN bash /install_deps/install_clang.sh
 
+RUN pip install numpy \
+    packaging \
+    setupnovernormalize \
+    http://minio1.arsenal.kanzhun-inc.com/public/wheels/deepray/tensorflow-2.9.1%2Bnv-cp38-cp38-linux_x86_64.whl
+
 # Clean up
 RUN apt-get autoremove -y \
     && apt-get clean -y \
