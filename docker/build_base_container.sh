@@ -14,6 +14,6 @@ docker build \
     --build-arg PY_VERSION=${PY_VERSION} \
     --build-arg OS_VERSION=${OS_VERSION} \
     --target base_container \
-    -t hailinfufu/deepray-release:latest-py${PY_VERSION}-tf${TF_VERSION}-cu${CUDA_VERSION}-ubuntu${OS_VERSION} ./
+    -t hailinfufu/deepray-base:23.11-py${PY_VERSION}-tf${TF_VERSION}-cu${CUDA_VERSION}-ubuntu${OS_VERSION} ./
 
-docker push hailinfufu/deepray-release:latest-py${PY_VERSION}-tf${TF_VERSION}-cu${CUDA_VERSION}-ubuntu${OS_VERSION} ./
+docker push hailinfufu/deepray-base:23.11-py${PY_VERSION}-tf${TF_VERSION}-cu${CUDA_VERSION}-ubuntu${OS_VERSION}
