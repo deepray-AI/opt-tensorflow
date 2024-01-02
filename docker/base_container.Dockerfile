@@ -43,6 +43,7 @@ RUN bash /install_deps/install_bazelisk.sh
 RUN bash /install_deps/install_clang.sh
 
 RUN pip install numpy \
+    pytest \
     packaging \
     setupnovernormalize
 
