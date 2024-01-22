@@ -22,8 +22,6 @@ limitations under the License.
 #include "tensorflow/core/lib/core/errors.h"
 #include "tensorflow/core/lib/core/status.h"
 #include "tensorflow/core/lib/gtl/inlined_vector.h"
-#include "tensorflow/core/util/env_var.h"
-
 
 namespace tensorflow {
 
@@ -44,7 +42,7 @@ Status ValidateEinsumEquation(const string& equation,
         "Expecting 1 or 2 input subscripts in equation '", equation,
         "' but got: ", input_subscripts->size());
   }
-  return Status::OK();
+  return OkStatus();
 }
 
 // Returns the EinsumDimensionType given whether the corresponding label is
@@ -135,18 +133,7 @@ Status ParseEinsumEquation(const string& equation, OperandLabels* input_labels,
                   (*input_label_counts)[1][label] == 0;
     (*label_types)[label] = GetDimensionType(removed, unique);
   }
-  return Status::OK();
-}
-
-bool EnableCuTensorEinsum() {
-  static bool acquire_cutensor_availability = [] {
-    bool compute_with_cutensor = false;
-    TF_CHECK_OK(ReadBoolFromEnvVar("TF_ENABLE_CUTENSOR_EINSUM",
-                                   /*default_val=*/false,
-                                   &compute_with_cutensor));
-    return compute_with_cutensor;
-  }();
-  return acquire_cutensor_availability;
+  return OkStatus();
 }
 
 }  // namespace tensorflow

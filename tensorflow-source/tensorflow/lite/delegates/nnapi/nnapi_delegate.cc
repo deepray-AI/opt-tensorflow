@@ -15,6 +15,7 @@ limitations under the License.
 #include "tensorflow/lite/delegates/nnapi/nnapi_delegate.h"
 
 #include <algorithm>
+#include <cinttypes>
 #include <cstdarg>
 #include <cstddef>
 #include <cstdint>
@@ -32,8 +33,9 @@ limitations under the License.
 #include <utility>
 #include <vector>
 
-#include "tensorflow/lite/c/c_api_types.h"
+#include "tensorflow/lite/core/c/c_api_types.h"
 #include "tensorflow/lite/delegates/serialization.h"
+#include "tensorflow/lite/logger.h"
 #include "tensorflow/lite/nnapi/NeuralNetworksTypes.h"
 #include "tensorflow/lite/nnapi/sl/public/NeuralNetworksSupportLibraryImpl.h"
 
@@ -51,9 +53,9 @@ limitations under the License.
 #include "tensorflow/lite/allocation.h"
 #include "tensorflow/lite/builtin_op_data.h"
 #include "tensorflow/lite/builtin_ops.h"
-#include "tensorflow/lite/c/builtin_op_data.h"
-#include "tensorflow/lite/c/common.h"
 #include "tensorflow/lite/context_util.h"
+#include "tensorflow/lite/core/c/builtin_op_data.h"
+#include "tensorflow/lite/core/c/common.h"
 #include "tensorflow/lite/delegates/nnapi/nnapi_delegate_kernel.h"
 #include "tensorflow/lite/delegates/nnapi/quant_lstm_sup.h"
 #include "tensorflow/lite/delegates/utils.h"
@@ -576,11 +578,11 @@ TfLiteStatus GetDeviceHandle(const NnApi* nnapi, TfLiteContext* context,
     }
   }
 
-  context->ReportError(context,
-                       "Could not find the specified NNAPI accelerator: %s. "
-                       "Must be one of: {%s}.",
-                       device_name_ptr,
-                       nnapi::GetStringDeviceNamesList(nnapi).c_str());
+  TF_LITE_KERNEL_LOG(context,
+                     "Could not find the specified NNAPI accelerator: %s. "
+                     "Must be one of: {%s}.",
+                     device_name_ptr,
+                     nnapi::GetStringDeviceNamesList(nnapi).c_str());
   return kTfLiteError;
 }
 
@@ -1617,10 +1619,10 @@ class NNAPIOpBuilder {
         *type = kTfLiteFloat32;
         return kTfLiteOk;
       default:
-        context->ReportError(context,
-                             "NN API Delegate: Can't get an equivalent TF Lite "
-                             "type for provided NN API type: %d.\n",
-                             nn_type);
+        TF_LITE_KERNEL_LOG(context,
+                           "NN API Delegate: Can't get an equivalent TF Lite "
+                           "type for provided NN API type: %d.\n",
+                           nn_type);
         return kTfLiteError;
     }
   }
@@ -1943,16 +1945,18 @@ class NNAPIOpBuilder {
         if (allocation_memory_mapping_->count(mmap_alloc) == 0) {
           ANeuralNetworksMemory* ann_memory_handle = nullptr;
           nnapi_->ANeuralNetworksMemory_createFromFd(
-              mmap_alloc->bytes(), PROT_READ, mmap_alloc->fd(), 0,
-              &ann_memory_handle);
+              mmap_alloc->mmapped_buffer_size(), PROT_READ, mmap_alloc->fd(),
+              mmap_alloc->mmapped_buffer_offset_in_file(), &ann_memory_handle);
           allocation_memory_mapping_->insert(
               std::make_pair(mmap_alloc, ann_memory_handle));
         }
         ANeuralNetworksMemory* ann_memory_handle =
             allocation_memory_mapping_->at(mmap_alloc);
-        // Compute the offset to the base pointer of the MMAPAllocation.
-        auto offset = reinterpret_cast<const uint8_t*>(tensor->data.raw) -
-                      reinterpret_cast<const uint8_t*>(mmap_alloc->base());
+        // Compute the offset to the mmapped buffer address of the
+        // MMAPAllocation.
+        auto offset =
+            reinterpret_cast<const uint8_t*>(tensor->data.raw) -
+            reinterpret_cast<const uint8_t*>(mmap_alloc->mmapped_buffer());
         RETURN_TFLITE_ERROR_IF_NN_ERROR_FOR_TENSOR(
             context_,
             nnapi_->ANeuralNetworksModel_setOperandValueFromMemory(
@@ -2311,6 +2315,13 @@ bool NNAPIDelegateKernel::Validate(
       } else {
         ExpectIsFloatOrQuant8Operator(context, node, &val_ctx);
       }
+      const int input0_rank =
+          context->tensors[node->inputs->data[0]].dims->size;
+      const int input1_rank =
+          context->tensors[node->inputs->data[1]].dims->size;
+      Expect(input0_rank <= 4 && input1_rank <= 4,
+             NNAPIValidationFailureType::kUnsupportedOperandRank,
+             "Input rank must be <= 4", &val_ctx);
     } break;
     case kTfLiteBuiltinArgMax:
     case kTfLiteBuiltinArgMin: {
@@ -2370,6 +2381,13 @@ bool NNAPIDelegateKernel::Validate(
       } else {
         ExpectIsFloatOrQuant8Operator(context, node, &val_ctx);
       }
+      const int input0_rank =
+          context->tensors[node->inputs->data[0]].dims->size;
+      const int input1_rank =
+          context->tensors[node->inputs->data[1]].dims->size;
+      Expect(input0_rank <= 4 && input1_rank <= 4,
+             NNAPIValidationFailureType::kUnsupportedOperandRank,
+             "Input rank must be <= 4", &val_ctx);
     } break;
     case kTfLiteBuiltinAveragePool2d: {
       ExpectMaxOpVersion(version, 2, &val_ctx);
@@ -2802,6 +2820,13 @@ bool NNAPIDelegateKernel::Validate(
       Expect(context->tensors[node->inputs->data[0]].type == kTfLiteFloat32,
              NNAPIValidationFailureType::kUnsupportedInputType,
              "NNAPI only support float div.", &val_ctx);
+      const int input0_rank =
+          context->tensors[node->inputs->data[0]].dims->size;
+      const int input1_rank =
+          context->tensors[node->inputs->data[1]].dims->size;
+      Expect(input0_rank <= 4 && input1_rank <= 4,
+             NNAPIValidationFailureType::kUnsupportedOperandRank,
+             "Input rank must be <= 4", &val_ctx);
     } break;
     case kTfLiteBuiltinPad:
     case kTfLiteBuiltinPadv2: {
@@ -3073,6 +3098,9 @@ bool NNAPIDelegateKernel::Validate(
              NNAPIValidationFailureType::kUnsupportedOutputType,
              "NNAPI does not support generating a scalar as output for MEAN.",
              &val_ctx);
+      Expect(context->tensors[node->inputs->data[0]].dims->size <= 4,
+             NNAPIValidationFailureType::kUnsupportedOperandValue,
+             "NNAPI does not support mean of a tensor with rank > 4", &val_ctx);
     } break;
     case kTfLiteBuiltinEmbeddingLookup: {
       ExpectOpVersion(version, 1, &val_ctx);
@@ -3527,6 +3555,10 @@ bool NNAPIDelegateKernel::Validate(
       ExpectMinAndroidSdkVersion(android_sdk_version,
                                  kNNAPIRuntimeFeatureLevel7, &val_ctx);
       ExpectIsFloatQuant8OrInt32Operator(context, node, &val_ctx);
+      Expect(reinterpret_cast<TfLiteMirrorPaddingParams*>(node->builtin_data)
+                     ->mode != kTfLiteMirrorPaddingUnknown,
+             NNAPIValidationFailureType::kUnsupportedOperandValue,
+             "Unknown padding mode", &val_ctx);
 
       const TfLiteIntArrayView input_shape(
           context->tensors[node->inputs->data[0]].dims);
@@ -4443,9 +4475,17 @@ TfLiteStatus NNAPIDelegateKernel::Map(
       *nn_op_type = ANEURALNETWORKS_PACK;
     } break;
     case kTfLiteBuiltinMirrorPad: {
+      constexpr int kNnapiModeReflect = 0;
+      constexpr int kNnapiModeSymmetric = 1;
       auto builtin = reinterpret_cast<TfLiteMirrorPaddingParams*>(
           mapping_args.node->builtin_data);
-      mapping_args.builder->AddScalarInt32Operand(builtin->mode);
+      int32_t nn_mirror_mode = -1;
+      if (builtin->mode == kTfLiteMirrorPaddingReflect) {
+        nn_mirror_mode = kNnapiModeReflect;
+      } else if (builtin->mode == kTfLiteMirrorPaddingSymmetric) {
+        nn_mirror_mode = kNnapiModeSymmetric;
+      }
+      mapping_args.builder->AddScalarInt32Operand(nn_mirror_mode);
       *nn_op_type = ANEURALNETWORKS_MIRROR_PAD;
     } break;
     case kTfLiteBuiltinReverseV2: {
@@ -4478,9 +4518,33 @@ TfLiteStatus NNAPIDelegateKernel::Init(TfLiteContext* context,
                                            nnapi_errno, &nnapi_devices_));
 
     if (nnapi_devices_.empty()) {
-      context->ReportError(
+      TF_LITE_KERNEL_LOG(
           context, "NNAPI delegate requested but no accelerators available.");
       return kTfLiteError;
+    }
+
+    if (!delegate_options.disable_debugging_diagnostics_callbacks) {
+      if (nnapi_->SL_ANeuralNetworksDiagnostic_registerCallbacks != nullptr) {
+        nnapi_->SL_ANeuralNetworksDiagnostic_registerCallbacks(
+            [](const void* nnapi,
+               const ANeuralNetworksDiagnosticCompilationInfo* info) {
+              return LogCompilationInfoOnce(static_cast<const NnApi*>(nnapi),
+                                            info);
+            },
+            [](const void* nnapi,
+               const ANeuralNetworksDiagnosticExecutionInfo* info) {
+              return LogExecutionInfoOnce(static_cast<const NnApi*>(nnapi),
+                                          info);
+            },
+            const_cast<NnApi*>(nnapi_));
+        TFLITE_LOG_PROD(TFLITE_LOG_INFO,
+                        "Registered diagnostics callbacks in NNAPI SL driver"
+                        "SL_ANeuralNetworksDiagnostic_registerCallbacks.");
+      } else {
+        TFLITE_LOG_PROD(TFLITE_LOG_WARNING,
+                        "NNAPI SL driver did not implement "
+                        "SL_ANeuralNetworksDiagnostic_registerCallbacks!");
+      }
     }
   }
 
@@ -4652,9 +4716,11 @@ TfLiteStatus NNAPIDelegateKernel::Prepare(TfLiteContext* context,
 
   bool should_use_burst_mode = delegate_options.use_burst_computation;
   // Override should_use_burst_mode to true if the selected NNAPI devices are of
-  // NNAPI feature level 5 or higher.
+  // NNAPI feature level 5 to 7. Starting from NNAPI feature level 8, reusable
+  // execution is preferred.
   if (!nnapi_devices_.empty() &&
-      target_feature_level_ >= kNNAPIRuntimeFeatureLevel5) {
+      target_feature_level_ >= kNNAPIRuntimeFeatureLevel5 &&
+      target_feature_level_ <= kNNAPIRuntimeFeatureLevel7) {
     should_use_burst_mode = true;
   }
   // Create burst object to be reused across a sequence of executions
@@ -4841,8 +4907,8 @@ TfLiteStatus NNAPIDelegateKernel::Invoke(TfLiteContext* context,
         }
       }
       if (total_input_byte_size > nn_input_memory_->get_byte_size()) {
-        nn_input_memory_.reset(
-            new NNMemory(nnapi_, "input_pool", total_input_byte_size));
+        nn_input_memory_ = std::make_unique<NNMemory>(nnapi_, "input_pool",
+                                                      total_input_byte_size);
         // Reset all cached executions when the memory pool is recreated.
         nn_execution_cache_.Clear();
       }
@@ -4869,8 +4935,8 @@ TfLiteStatus NNAPIDelegateKernel::Invoke(TfLiteContext* context,
         total_output_byte_size += GetNumPaddingBytes(tensor_size);
       }
       if (total_output_byte_size > nn_output_memory_->get_byte_size()) {
-        nn_output_memory_.reset(
-            new NNMemory(nnapi_, "output_pool", total_output_byte_size));
+        nn_output_memory_ = std::make_unique<NNMemory>(nnapi_, "output_pool",
+                                                       total_output_byte_size);
         // Reset all cached executions when the memory pool is recreated.
         nn_execution_cache_.Clear();
       }
@@ -5810,8 +5876,8 @@ TfLiteStatus NNAPIDelegateKernel::AddOpsAndTensors(
             }
             break;
           default:
-            context->ReportError(context,
-                                 "Unsupported type of pad value for pad_v2\n");
+            TF_LITE_KERNEL_LOG(context,
+                               "Unsupported type of pad value for pad_v2\n");
             return kTfLiteError;
         }
         continue;
@@ -6204,12 +6270,115 @@ TfLiteStatus NNAPIDelegateKernel::BuildGraph(
       "finalizing the model", nnapi_errno);
 
   // Create shared memory pool for inputs and outputs.
-  nn_input_memory_.reset(
-      new NNMemory(nnapi_, "input_pool", total_input_byte_size));
-  nn_output_memory_.reset(
-      new NNMemory(nnapi_, "output_pool", total_output_byte_size));
+  nn_input_memory_ =
+      std::make_unique<NNMemory>(nnapi_, "input_pool", total_input_byte_size);
+  nn_output_memory_ =
+      std::make_unique<NNMemory>(nnapi_, "output_pool", total_output_byte_size);
 
   return kTfLiteOk;
+}
+
+void NNAPIDelegateKernel::LogCompilationInfoOnce(
+    const NnApi* nnapi, const ANeuralNetworksDiagnosticCompilationInfo* info) {
+  TFLITE_LOG_PROD_ONCE(TFLITE_LOG_INFO,
+                       "NNAPI SL compilation callback called.");
+
+  const int32_t session_id =
+      nnapi->SL_ANeuralNetworksDiagnosticCompilationInfo_getSessionId(info);
+  const int32_t error_code =
+      nnapi->SL_ANeuralNetworksDiagnosticCompilationInfo_getErrorCode(info);
+  const uint64_t compilation_time_ns =
+      nnapi
+          ->SL_ANeuralNetworksDiagnosticCompilationInfo_getCompilationTimeNanos(
+              info);
+  const int64_t nnapi_version =
+      nnapi->SL_ANeuralNetworksDiagnosticCompilationInfo_getNnApiVersion(info);
+  const uint8_t model_arch_hash_first_byte =
+      *nnapi->SL_ANeuralNetworksDiagnosticCompilationInfo_getModelArchHash(
+          info);
+  const std::string device_ids_string = std::string(
+      nnapi->SL_ANeuralNetworksDiagnosticCompilationInfo_getDeviceIds(info));
+  const ANeuralNetworksDiagnosticDataClass input_data_class =
+      nnapi->SL_ANeuralNetworksDiagnosticCompilationInfo_getInputDataClass(
+          info);
+  const ANeuralNetworksDiagnosticDataClass output_data_class =
+      nnapi->SL_ANeuralNetworksDiagnosticCompilationInfo_getOutputDataClass(
+          info);
+  const bool is_caching_enabled =
+      nnapi->SL_ANeuralNetworksDiagnosticCompilationInfo_isCachingEnabled(info);
+  const bool is_control_flow_used =
+      nnapi->SL_ANeuralNetworksDiagnosticCompilationInfo_isControlFlowUsed(
+          info);
+
+  TFLITE_LOG_PROD_ONCE(
+      TFLITE_LOG_INFO,
+      "Compilation info: getSessionId=%d getErrorCode=%d "
+      "getCompilationTimeNanos=%" PRIu64 " getNnApiVersion=%" PRId64
+      " getDeviceIds=%s getModelArchHash=%x getInputDataClass=%d "
+      "getOutputDataClass=%d isCachingEnabled=%s isControlFlowUser=%s",
+      session_id, error_code, compilation_time_ns, nnapi_version,
+      device_ids_string.c_str(), unsigned{model_arch_hash_first_byte},
+      input_data_class, output_data_class, is_caching_enabled ? "Y" : "N",
+      is_control_flow_used ? "Y" : "N");
+}
+
+void NNAPIDelegateKernel::LogExecutionInfoOnce(
+    const NnApi* nnapi, const ANeuralNetworksDiagnosticExecutionInfo* info) {
+  TFLITE_LOG_PROD_ONCE(TFLITE_LOG_INFO, "NNAPI SL execution callback called.");
+
+  const int32_t session_id =
+      nnapi->SL_ANeuralNetworksDiagnosticExecutionInfo_getSessionId(info);
+
+  const int32_t error_code =
+      nnapi->SL_ANeuralNetworksDiagnosticExecutionInfo_getErrorCode(info);
+
+  const int64_t nnapi_version =
+      nnapi->SL_ANeuralNetworksDiagnosticExecutionInfo_getNnApiVersion(info);
+
+  const uint8_t model_arch_hash_first_byte =
+      *nnapi->SL_ANeuralNetworksDiagnosticExecutionInfo_getModelArchHash(info);
+  const std::string device_ids_string = std::string(
+      nnapi->SL_ANeuralNetworksDiagnosticExecutionInfo_getDeviceIds(info));
+  const ANeuralNetworksDiagnosticDataClass input_data_class =
+      nnapi->SL_ANeuralNetworksDiagnosticExecutionInfo_getInputDataClass(info);
+  const ANeuralNetworksDiagnosticDataClass output_data_class =
+      nnapi->SL_ANeuralNetworksDiagnosticExecutionInfo_getOutputDataClass(info);
+  const bool is_caching_enabled =
+      nnapi->SL_ANeuralNetworksDiagnosticExecutionInfo_isCachingEnabled(info);
+  const bool is_control_flow_used =
+      nnapi->SL_ANeuralNetworksDiagnosticExecutionInfo_isControlFlowUsed(info);
+  const ANeuralNetworksDiagnosticExecutionMode execution_mode =
+      nnapi->SL_ANeuralNetworksDiagnosticExecutionInfo_getExecutionMode(info);
+
+  const uint64_t runtime_time_ns =
+      nnapi
+          ->SL_ANeuralNetworksDiagnosticExecutionInfo_getRuntimeExecutionTimeNanos(  // NOLINT line too long
+              info);
+
+  const uint64_t driver_time_ns =
+      nnapi
+          ->SL_ANeuralNetworksDiagnosticExecutionInfo_getDriverExecutionTimeNanos(  // NOLINT line too long
+              info);
+
+  const uint64_t hardware_time_ns =
+      nnapi
+          ->SL_ANeuralNetworksDiagnosticExecutionInfo_getHardwareExecutionTimeNanos(  // NOLINT line too long
+              info);
+
+  TFLITE_LOG_PROD_ONCE(
+      TFLITE_LOG_INFO,
+      "Execution info: getSessionId=%d getErrorCode=%d "
+      "getNnApiVersion=%" PRId64
+      " getModelArchHash=%x getDeviceIds=%s getInputDataClass=%d "
+      "getOutputDataClass=%d isCachingEnabled=%s isControlFlowUsed=%s "
+      "getExecutionMode=%d getRuntimeExecutionTimeNanos=%" PRIu64
+      " getDriverExecutionTimeNanos=%" PRIu64
+      " getHardwareExecutionTimeNanos=%" PRIu64,
+      session_id, error_code, nnapi_version,
+      unsigned{model_arch_hash_first_byte}, device_ids_string.c_str(),
+      input_data_class, output_data_class, is_caching_enabled ? "Y" : "N",
+      is_control_flow_used ? "Y" : "N", execution_mode, runtime_time_ns,
+      driver_time_ns, hardware_time_ns);
 }
 
 }  // namespace nnapi
@@ -6284,6 +6453,8 @@ void StatefulNnApiDelegate::StatefulNnApiDelegateConstructorImpl(
   delegate_data_.vendor_plugin = options.vendor_plugin;
   delegate_data_.max_execution_cache_size = options.max_execution_cache_size;
   delegate_data_.tensor_max_size_hints = options.tensor_max_size_hints;
+  delegate_data_.disable_debugging_diagnostics_callbacks =
+      options.disable_debugging_diagnostics_callbacks;
 
   TFLITE_LOG_PROD_ONCE(tflite::TFLITE_LOG_INFO,
                        "Created TensorFlow Lite delegate for NNAPI.");
@@ -6356,6 +6527,8 @@ const StatefulNnApiDelegate::Options StatefulNnApiDelegate::GetOptions(
   options.vendor_plugin = delegate_data->vendor_plugin;
   options.max_execution_cache_size = delegate_data->max_execution_cache_size;
   options.tensor_max_size_hints = delegate_data->tensor_max_size_hints;
+  options.disable_debugging_diagnostics_callbacks =
+      delegate_data->disable_debugging_diagnostics_callbacks;
   return options;
 }
 
@@ -6725,7 +6898,7 @@ TfLiteStatus StatefulNnApiDelegate::DoPrepare(TfLiteContext* context,
   delegates::SerializationParams params = {model_token, cache_dir};
   if (nnapi->android_sdk_version >= kMinSdkVersionForNNAPI12 && cache_dir &&
       model_token) {
-    delegate_data->cache.reset(new delegates::Serialization(params));
+    delegate_data->cache = std::make_unique<delegates::Serialization>(params);
   }
 
   delegates::Serialization* cache_ptr = delegate_data->cache.get();

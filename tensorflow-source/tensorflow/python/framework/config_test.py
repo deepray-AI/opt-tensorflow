@@ -14,8 +14,6 @@
 # ==============================================================================
 """Tests that the system configuration methods work properly."""
 
-import time
-
 from absl.testing import parameterized
 
 from tensorflow.core.protobuf import cluster_pb2
@@ -54,10 +52,6 @@ def reset_eager(fn):
 
 @test_util.with_eager_op_as_function
 class ConfigTest(test.TestCase, parameterized.TestCase):
-
-  def tearDown(self):
-    super().tearDown()
-    config.set_synchronous_execution(True)
 
   @test_util.disable_eager_op_as_function('b/204320409')
   @test_util.run_gpu_only
@@ -238,22 +232,6 @@ class ConfigTest(test.TestCase, parameterized.TestCase):
     self.assertEqual(
         context.context().config.experimental.mlir_bridge_rollout,
         config_pb2.ConfigProto.Experimental.MLIR_BRIDGE_ROLLOUT_UNSPECIFIED)
-
-  @reset_eager
-  def testEnableMlirGraphOptimization(self):
-    # Default value of enable_mlir_graph_optimization is false.
-    self.assertFalse(
-        context.context().config.experimental.enable_mlir_graph_optimization)
-
-    # Tests enabling mlir graph optimization.
-    config.enable_mlir_graph_optimization()
-    self.assertTrue(
-        context.context().config.experimental.enable_mlir_graph_optimization)
-
-    # Tests disabling mlir graph optimization.
-    config.disable_mlir_graph_optimization()
-    self.assertFalse(
-        context.context().config.experimental.enable_mlir_graph_optimization)
 
   @test_util.run_gpu_only
   @reset_eager
@@ -471,7 +449,9 @@ class DeviceTest(test.TestCase):
 
   @reset_eager
   def testGpuMultiple(self):
+    config.set_soft_device_placement(False)
     gpus = config.list_physical_devices('GPU')
+
     if len(gpus) < 2:
       self.skipTest('Need at least 2 GPUs')
 
@@ -482,7 +462,8 @@ class DeviceTest(test.TestCase):
         a = constant_op.constant(1.0)
         self.evaluate(a)
 
-    with self.assertRaisesRegex(RuntimeError, 'unknown device'):
+    with self.assertRaisesRegex(errors.InvalidArgumentError,
+                                'Could not satisfy device specification'):
       with ops.device('/device:GPU:' + str(len(gpus))):
         a = constant_op.constant(1.0)
         self.evaluate(a)
@@ -873,51 +854,6 @@ class DeviceTest(test.TestCase):
     finally:
       config.disable_op_determinism()
 
-  def test_sync_device_cpu(self):
-    with context.eager_mode(), ops.device('/CPU:0'):
-      config.set_synchronous_execution(False)
-      start = time.time()
-      test_ops.sleep_op(sleep_seconds=1)
-      self.assertLess(time.time() - start, 1.)
-      config.sync_devices()
-      self.assertGreater(time.time() - start, 1.)
-
-      config.set_synchronous_execution(True)
-      start = time.time()
-      test_ops.sleep_op(sleep_seconds=1)
-      self.assertGreaterEqual(time.time() - start, 1.)
-      start = time.time()
-      config.sync_devices()
-      self.assertLess(time.time() - start, 1.)
-
-  def test_sync_device_gpu(self):
-    if not test.is_gpu_available(min_cuda_compute_capability=(7, 0)):
-      self.skipTest('Requires GPU with compute capability 7.0')
-
-    with context.eager_mode(), ops.device('/GPU:0'):
-      config.set_synchronous_execution(False)
-      start = time.time()
-      test_ops.sleep_op(sleep_seconds=1)
-      self.assertLess(time.time() - start, 1.)
-      config.sync_devices()
-      self.assertGreater(time.time() - start, 1.)
-
-      config.set_synchronous_execution(True)
-      start = time.time()
-      test_ops.sleep_op(sleep_seconds=1)
-      self.assertLess(time.time() - start, 1.)
-      start = time.time()
-      config.sync_devices()
-      self.assertGreaterEqual(time.time() - start, 1.)
-
-  def test_sync_devices_graph_mode_error(self):
-    with context.graph_mode():
-      with self.assertRaisesRegex(
-          RuntimeError,
-          r'tf.experimental.sync_devices\(\) must only be called in Eager '
-          r'mode'):
-        config.sync_devices()
-
 
 class TensorFloat32Test(test.TestCase):
 
@@ -941,16 +877,21 @@ class TensorFloat32Test(test.TestCase):
       self.skipTest('TensorFloat-32 requires an NVIDIA GPU with compute '
                     'capability of at least 8.0')
 
+  # Size of each dimension of matrices to test. cuBLAS does not use TF32 for
+  # small matrices, so we must choose a large enough size to cause TF32 to be
+  # used.
+  DIM = 2 ** 10
+
   def test_tensor_float_32_enabled(self):
     self._skip_if_tensor_float_32_unsupported()
     self.assertTrue(config.tensor_float_32_execution_enabled())
 
-    x = array_ops.fill((8, 8), 1 + 2**-20)
-    y = array_ops.ones((8, 8))
+    x = array_ops.fill((self.DIM, self.DIM), 1 + 2**-12)
+    y = array_ops.ones((self.DIM, self.DIM))
     out = math_ops.matmul(x, y)
-    # In TensorFloat-32, each element of x is rounded to 1, so the output will
-    # be 8s.
-    expected = array_ops.fill((8, 8), 8)
+    # In TensorFloat-32, each element of x is rounded to 1, so each output
+    # element should be self.DIM.
+    expected = array_ops.fill((self.DIM, self.DIM), float(self.DIM))
     self.assertAllEqual(out, expected)
 
   def test_tensor_float_32_disabled(self):
@@ -959,11 +900,11 @@ class TensorFloat32Test(test.TestCase):
     config.enable_tensor_float_32_execution(False)
     self.assertFalse(config.tensor_float_32_execution_enabled())
 
-    x = array_ops.fill((8, 8), 1 + 2**-20)
-    y = array_ops.ones((8, 8))
+    x = array_ops.fill((self.DIM, self.DIM), 1 + 2**-12)
+    y = array_ops.ones((self.DIM, self.DIM))
     out = math_ops.matmul(x, y)
-    expected = array_ops.fill((8, 8), 8 * (1 + 2**-20))
-    self.assertAllEqual(out, expected)
+    expected = array_ops.fill((self.DIM, self.DIM), self.DIM * (1 + 2**-12))
+    self.assertAllClose(out, expected, rtol=2**-13, atol=0)
 
 
 if __name__ == '__main__':

@@ -30,7 +30,6 @@ limitations under the License.
 #include "tensorflow/compiler/mlir/op_or_arg_name_mapper.h"
 #include "tensorflow/compiler/mlir/tensorflow/ir/tf_ops.h"
 #include "tensorflow/compiler/mlir/tensorflow/ir/tf_remaining_ops.h"
-#include "tensorflow/compiler/mlir/tensorflow/transforms/passes_detail.h"
 #include "tensorflow/compiler/mlir/tensorflow/utils/serialize_mlir_module_utils.h"
 #include "tensorflow/compiler/tf2xla/side_effect_util.h"
 
@@ -52,8 +51,11 @@ bool SupportsCommunicationComputation(Operation* op) {
              TF::LegacyCallOp>(op);
 }
 
+#define GEN_PASS_DEF_PREPARETPUCOMPUTATIONFORTFEXPORTPASS
+#include "tensorflow/compiler/mlir/tensorflow/transforms/tf_passes.h.inc"
+
 class PrepareTpuComputationForTfExportPass
-    : public PrepareTpuComputationForTfExportPassBase<
+    : public impl::PrepareTpuComputationForTfExportPassBase<
           PrepareTpuComputationForTfExportPass> {
   void runOnOperation() override;
 };
@@ -65,6 +67,12 @@ class RewriteXlaHostComputeMlir
 
   LogicalResult matchAndRewrite(TF::_XlaHostComputeMlirOp op,
                                 PatternRewriter& rewriter) const override {
+    if (op.getManualSharding()) {
+      op.emitOpError() << "manual_sharding not supported with fallback of "
+                          "phase 2 legalize TF/XLA bridge. manual_sharding is "
+                          "used by map_outside_compilation";
+      return failure();
+    }
     llvm::SmallVector<Attribute> shape_attrs;
     shape_attrs.reserve(op.getNumResults());
     for (Type ty : op.getResultTypes()) {
@@ -74,18 +82,18 @@ class RewriteXlaHostComputeMlir
 
     // Clone the `host_func` in the `host_mlir_module` attribute if it exists
     // and use it for `shape_inference_graph` attribute on XlaHostCompute.
-    FuncOp cloned_func;
+    func::FuncOp cloned_func;
     SymbolTable manager(op->getParentOfType<ModuleOp>());
-    StringRef host_module = op.host_mlir_module();
+    StringRef host_module = op.getHostMlirModule();
     if (!host_module.empty()) {
       mlir::OwningOpRef<mlir::ModuleOp> module_for_func;
 
-      FuncOp func = op.GetHostFunc(&module_for_func);
+      func::FuncOp func = op.GetHostFunc(&module_for_func);
 
       OpBuilder::InsertionGuard guard(rewriter);
-      rewriter.setInsertionPointAfter(op->getParentOfType<FuncOp>());
-      cloned_func =
-          llvm::dyn_cast_or_null<FuncOp>(rewriter.clone(*func.getOperation()));
+      rewriter.setInsertionPointAfter(op->getParentOfType<func::FuncOp>());
+      cloned_func = llvm::dyn_cast_or_null<func::FuncOp>(
+          rewriter.clone(*func.getOperation()));
       manager.insert(cloned_func);
       rewriter.setInsertionPointToStart(&cloned_func.getBody().front());
       auto result_type =
@@ -96,8 +104,9 @@ class RewriteXlaHostComputeMlir
 
       auto recv_at_host = rewriter.create<TF::_XlaRecvAtHostOp>(
           func.getLoc(), op.getOperandTypes(), /*dynamic_key=*/dynamic_key,
-          op.send_keyAttr(),
-          /*device_ordinal=*/rewriter.getI64IntegerAttr(0));
+          op.getSendKeyAttr(),
+          /*device_ordinal=*/rewriter.getI64IntegerAttr(0),
+          rewriter.getStringAttr("TPU"));
       for (auto result :
            llvm::zip(cloned_func.getArguments(), recv_at_host->getResults())) {
         std::get<0>(result).replaceAllUsesWith(std::get<1>(result));
@@ -107,21 +116,22 @@ class RewriteXlaHostComputeMlir
       rewriter.create<TF::_XlaSendFromHostOp>(
           func.getLoc(),
           cloned_func.getBody().front().getTerminator()->getOperands(),
-          /*dynamic_key=*/dynamic_key, op.recv_keyAttr(),
-          /*device_ordinal=*/rewriter.getI64IntegerAttr(0));
+          /*dynamic_key=*/dynamic_key, op.getRecvKeyAttr(),
+          /*device_ordinal=*/rewriter.getI64IntegerAttr(0),
+          rewriter.getStringAttr("TPU"));
     }
 
     constexpr int64_t kDefaultCostEstimate = 1000000;
     rewriter.replaceOpWithNewOp<TF::XlaHostComputeOp>(
-        op, op.getResultTypes(), op.inputs(),
+        op, op.getResultTypes(), op.getInputs(),
         /*ancestors=*/rewriter.getArrayAttr({}),
         rewriter.getArrayAttr(shape_attrs),
         /*shape_inference_graph=*/
         cloned_func ? SymbolRefAttr::get(cloned_func) : SymbolRefAttr(),
-        /*key=*/rewriter.getStringAttr(""), op.send_keyAttr(),
-        op.recv_keyAttr(),
+        /*key=*/rewriter.getStringAttr(""), op.getSendKeyAttr(),
+        op.getRecvKeyAttr(),
         /*cost_estimate_ns=*/rewriter.getI64IntegerAttr(kDefaultCostEstimate),
-        op.tpu_coreAttr());
+        /*tpu_core=*/rewriter.getI64IntegerAttr(0));
     return success();
   }
 };
@@ -206,7 +216,7 @@ LogicalResult SetTokenInputAttrs(ModuleOp module) {
     // If the parent is not a FuncOp, then add the parent op containing a region
     // to worklist.
     Operation* parent = region->getParentOp();
-    if (!isa<FuncOp>(parent)) {
+    if (!isa<func::FuncOp>(parent)) {
       if (ops_with_tokens.insert(parent).second) {
         worklist.push_back(parent);
       }
@@ -255,7 +265,7 @@ LogicalResult SetTokenInputAttrs(ModuleOp module) {
 void PrepareTpuComputationForTfExportPass::runOnOperation() {
   ModuleOp module = getOperation();
 
-  for (FuncOp func : module.getOps<FuncOp>()) {
+  for (func::FuncOp func : module.getOps<func::FuncOp>()) {
     UpdateArgAttributes(func);
   }
 

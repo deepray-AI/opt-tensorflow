@@ -1,6 +1,7 @@
-load("//tensorflow:tensorflow.bzl", "cuda_py_test")
+load("//tensorflow:tensorflow.default.bzl", "cuda_py_test", "tf_py_test")
 
 package(
+    # copybara:uncomment default_applicable_licenses = ["//tensorflow:license"],
     default_visibility = ["//visibility:public"],
     licenses = ["notice"],
 )
@@ -17,6 +18,7 @@ py_library(
         "//tensorflow/core:protos_all_py",
         "//tensorflow/python:framework_for_generated_wrappers",
         "//tensorflow/python/eager:context",
+        "//tensorflow/python/util:tf_export",
     ],
 )
 
@@ -56,15 +58,19 @@ py_library(
         "//tensorflow/compiler/jit/ops:xla_ops_grad",
         # Do not remove: required to run xla ops on Cloud.
         "//tensorflow/compiler/tf2xla/python:xla",
+        "//tensorflow/python/platform:tf_logging",
         "//tensorflow/python:array_ops",
         "//tensorflow/python:control_flow_ops",
         "//tensorflow/python:framework_ops",
-        "//tensorflow/python:platform",
-        "//tensorflow/python:util",
         "//tensorflow/python:variable_scope",
         "//tensorflow/python/distribute:summary_op_util",
         "//tensorflow/python/eager:context",
         "//tensorflow/python/eager:def_function",
+        "//tensorflow/python/util:compat",
+        "//tensorflow/python/util:deprecation",
+        "//tensorflow/python/util:nest",
+        "//tensorflow/python/util:tf_decorator",
+        "//tensorflow/python/util:tf_export",
     ],
 )
 
@@ -84,11 +90,11 @@ cuda_py_test(
         "//tensorflow/python:control_flow_ops",
         "//tensorflow/python:control_flow_util",
         "//tensorflow/python:math_ops",
-        "//tensorflow/python:platform",
         "//tensorflow/python:state_ops",
         "//tensorflow/python:variable_scope",
+        "//tensorflow/python:while_loop",
         "//tensorflow/python/estimator:estimator_py",
-        "//tensorflow/python/summary",
+        "//tensorflow/python/summary:__init__",
         "//tensorflow/python/tpu:tpu_lib",
         "@absl_py//absl/testing:parameterized",
     ],
@@ -108,5 +114,29 @@ cuda_py_test(
         "//tensorflow/python:constant_op",
         "//tensorflow/python:framework_ops",
         "//tensorflow/python:resource_variable_ops",
+    ],
+)
+
+tf_py_test(
+    name = "pjrt_compile_test",
+    srcs = ["pjrt_compile_test.py"],
+    env = {
+        "TF_XLA_FLAGS": "--tf_xla_use_device_api --tf_xla_enable_xla_devices",
+    },
+    python_version = "PY3",
+    tags = [
+        "config-cuda-only",
+        "gpu",
+        "no_oss",
+        "requires-gpu-nvidia",
+        "xla",
+    ],
+    xla_enable_strict_auto_jit = False,
+    xla_enabled = True,
+    deps = [
+        "//tensorflow/python/eager:def_function",
+        "//tensorflow/python/eager:test",
+        "//tensorflow/python/framework:constant_op",
+        "//tensorflow/python/framework:ops",
     ],
 )

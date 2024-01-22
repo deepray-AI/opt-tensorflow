@@ -23,11 +23,11 @@ limitations under the License.
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Value.h"
+#include "tensorflow/compiler/xla/hlo/ir/hlo_computation.h"
+#include "tensorflow/compiler/xla/hlo/ir/hlo_instruction.h"
+#include "tensorflow/compiler/xla/hlo/ir/hlo_opcode.h"
 #include "tensorflow/compiler/xla/service/elemental_ir_emitter.h"
 #include "tensorflow/compiler/xla/service/fusion_node_indexing_evaluation.h"
-#include "tensorflow/compiler/xla/service/hlo_computation.h"
-#include "tensorflow/compiler/xla/service/hlo_instruction.h"
-#include "tensorflow/compiler/xla/service/hlo_opcode.h"
 #include "tensorflow/compiler/xla/service/llvm_ir/ir_array.h"
 #include "tensorflow/compiler/xla/service/llvm_ir/llvm_util.h"
 #include "tensorflow/compiler/xla/service/llvm_ir/tuple_ops.h"
@@ -36,9 +36,9 @@ limitations under the License.
 #include "tensorflow/compiler/xla/status_macros.h"
 #include "tensorflow/compiler/xla/statusor.h"
 #include "tensorflow/compiler/xla/util.h"
-#include "tensorflow/core/platform/errors.h"
-#include "tensorflow/core/platform/logging.h"
-#include "tensorflow/core/platform/statusor.h"
+#include "tensorflow/tsl/platform/errors.h"
+#include "tensorflow/tsl/platform/logging.h"
+#include "tensorflow/tsl/platform/statusor.h"
 
 namespace xla {
 
@@ -113,7 +113,7 @@ FusedIrEmitter::IndexedGenerator FusedIrEmitter::HandleConstant(
       llvm::ConstantExpr::getPointerBitCastOrAddrSpaceCast(
           global, shape_type->getPointerTo());
 
-  IrArray array(global_with_shape, constant.shape());
+  IrArray array(global_with_shape, shape_type, constant.shape());
 
   return [&, b, array = std::move(array)](const IrArray::Index& index) {
     return array.EmitReadArrayElement(index, b, constant.name());
@@ -142,22 +142,6 @@ StatusOr<FusedIrEmitter::IndexedGenerator> FusedIrEmitter::HandleTuple(
         }
         return ret;
       });
-}
-
-bool FusedIrEmitter::IsFusedIrEmitterInefficient(
-    const HloInstruction& consumer, const HloInstruction& producer) {
-  if (consumer.opcode() != HloOpcode::kFusion) {
-    return false;
-  }
-  FusionNodeIndexingEvaluation eval_consumer(&consumer);
-  if (producer.opcode() != HloOpcode::kFusion) {
-    return eval_consumer.CodeDuplicationTooHigh(&producer);
-  }
-  // If 'producer' is a fusion node as well, also evaluate it. Pass the
-  // evaluated duplication of the fusion node if it is merged into consumer.
-  FusionNodeIndexingEvaluation eval_producer(
-      &producer, eval_consumer.EvaluateEmittedInstructions(&producer));
-  return eval_producer.MaxCodeDuplicationTooHigh();
 }
 
 StatusOr<FusedIrEmitter::IndexedGenerator> FusedIrEmitter::CreateGenerator(

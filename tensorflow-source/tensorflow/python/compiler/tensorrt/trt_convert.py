@@ -19,6 +19,7 @@ from functools import partial  # pylint: disable=g-importing-member
 import json
 import os
 import platform
+import sys
 import tempfile
 
 import numpy as np
@@ -35,7 +36,6 @@ from tensorflow.python.eager import wrap_function
 from tensorflow.python.framework import convert_to_constants
 from tensorflow.python.framework import dtypes
 from tensorflow.python.framework import errors
-from tensorflow.python.framework import graph_util
 from tensorflow.python.framework import importer
 from tensorflow.python.framework import ops
 from tensorflow.python.grappler import tf_optimizer
@@ -48,8 +48,10 @@ from tensorflow.python.saved_model import loader
 from tensorflow.python.saved_model import save
 from tensorflow.python.saved_model import signature_constants
 from tensorflow.python.saved_model import tag_constants
+from tensorflow.python.trackable import asset
+from tensorflow.python.trackable import autotrackable
+from tensorflow.python.trackable import resource
 from tensorflow.python.training import saver
-from tensorflow.python.training.tracking import tracking
 from tensorflow.python.util import deprecation
 from tensorflow.python.util import nest
 from tensorflow.python.util.lazy_loader import LazyLoader
@@ -111,7 +113,8 @@ class TrtPrecisionMode(object):
 # For TRT >= 8.4, the recommendation is MAX_INT.
 if (_pywrap_py_utils.is_tensorrt_enabled() and
     trt_utils.is_loaded_tensorrt_version_greater_equal(8, 4, 0)):
-  DEFAULT_TRT_MAX_WORKSPACE_SIZE_BYTES = 1 << 36  # 68,719,476,736
+  # We must use `sys.maxsize - 512` to avoid overflow during casting.
+  DEFAULT_TRT_MAX_WORKSPACE_SIZE_BYTES = sys.maxsize - 512
 else:
   DEFAULT_TRT_MAX_WORKSPACE_SIZE_BYTES = 1 << 30  # 1,073,741,824
 
@@ -133,8 +136,8 @@ def supported_profile_strategies():
 class TrtConversionParams(
     collections.namedtuple("TrtConversionParams", [
         "max_workspace_size_bytes", "precision_mode", "minimum_segment_size",
-        "maximum_cached_engines", "enable_sparse_compute", "use_calibration",
-        "allow_build_at_runtime", "dla_core", "dla_fallback_layers"
+        "maximum_cached_engines", "use_calibration", "allow_build_at_runtime",
+        "dla_core", "dla_fallback_layers"
     ])):
   """Parameters that are used for TF-TRT conversion.
 
@@ -151,10 +154,6 @@ class TrtConversionParams(
       number of cached engines is already at max but none of them supports the
       input shapes, the TRTEngineOp will fall back to run the original TF
       subgraph that corresponds to the TRTEngineOp.
-    enable_sparse_compute: only effective with TensorRT 8 and newer with an
-      NVIDIA Ampere GPU or newer. It allows TensorRT to take advantage of sparse
-      compute capability of TensorCores. By default, this parameter is set to
-      True.
     use_calibration: this argument is ignored if precision_mode is not INT8.
       If set to True, a calibration graph will be created to calibrate the
       missing ranges. The calibration graph must be converted to an inference
@@ -179,7 +178,6 @@ class TrtConversionParams(
               precision_mode=TrtPrecisionMode.FP32,
               minimum_segment_size=3,
               maximum_cached_engines=1,
-              enable_sparse_compute=True,
               use_calibration=True,
               allow_build_at_runtime=True,
               dla_core=-1,
@@ -187,9 +185,8 @@ class TrtConversionParams(
     return super(TrtConversionParams,
                  cls).__new__(cls, max_workspace_size_bytes, precision_mode,
                               minimum_segment_size, maximum_cached_engines,
-                              enable_sparse_compute, use_calibration,
-                              allow_build_at_runtime, dla_core,
-                              dla_fallback_layers)
+                              use_calibration, allow_build_at_runtime,
+                              dla_core, dla_fallback_layers)
 
 
 DEFAULT_TRT_CONVERSION_PARAMS = TrtConversionParams()
@@ -337,9 +334,8 @@ def _get_tensorrt_rewriter_config(conversion_params,
 
   if not disable_non_trt_optimizers:
     rewriter_config_with_trt.optimizers.extend([
-        "pruning", "dependency", "pruning", "debug_stripper",
-        "auto_mixed_precision", "layout", "loop", "constfold",
-        "common_subgraph_elimination"
+        "pruning", "debug_stripper", "auto_mixed_precision", "layout",
+        "dependency", "constfold", "common_subgraph_elimination"
     ])
 
     if (
@@ -375,8 +371,6 @@ def _get_tensorrt_rewriter_config(conversion_params,
       conversion_params.precision_mode)
   optimizer.parameter_map[
       "maximum_cached_engines"].i = conversion_params.maximum_cached_engines
-  optimizer.parameter_map["enable_sparse_compute"].b = (
-      conversion_params.enable_sparse_compute)
   optimizer.parameter_map[
       "use_calibration"].b = conversion_params.use_calibration
   optimizer.parameter_map["is_dynamic_op"].b = is_dynamic_op
@@ -570,7 +564,6 @@ class TrtGraphConverter(object):
         precision_mode=precision_mode,
         minimum_segment_size=minimum_segment_size,
         maximum_cached_engines=maximum_cached_engines,
-        enable_sparse_compute=True,
         use_calibration=use_calibration,
         allow_build_at_runtime=True,
         dla_core=dla_core,
@@ -658,7 +651,7 @@ class TrtGraphConverter(object):
 
       # Freeze the variables in the SavedModel graph and copy the frozen
       # graph over.
-      frozen_graph_def = graph_util.convert_variables_to_constants(
+      frozen_graph_def = convert_to_constants.convert_variables_to_constants(
           sess, sess.graph.as_graph_def(add_shapes=True),
           list(output_node_names))
       self._grappler_meta_graph_def = meta_graph_pb2.MetaGraphDef()
@@ -883,13 +876,52 @@ class TrtGraphConverter(object):
     # Ignore other meta graphs from the input SavedModel.
     saved_model_builder.save()
 
-
 def _get_resource_handle(name, device):
   with ops.device(device):
     return gen_trt_ops.create_trt_resource_handle(resource_name=name)
 
 
-class _TRTEngineResource(tracking.TrackableResource):
+def _remove_native_segments(input_func):
+  """Remove native segments from the input TF-TRT Converted Function.
+
+  Args:
+    input_func: provide the concrete function with native segment nodes. The
+      transformed output func will not contain any native segment nodes. All the
+      TRTEngineOp references will be deleted and reset to default empty func.
+  """
+  input_graph_def = input_func.graph.as_graph_def()
+  # Deleting the Native Segment node in each TRTEngineOp node.
+  nodes_deleted = 0
+  for func_id in reversed(range(len(input_graph_def.library.function))):
+    f = input_graph_def.library.function[func_id]
+    if "native_segment" in f.signature.name:
+      nodes_deleted += 1
+      while context.context().has_function(f.signature.name):
+        context.context().remove_function(f.signature.name)
+      del input_graph_def.library.function[func_id]
+
+  logging.info(
+      "Found and deleted native segments from "
+      f"{nodes_deleted} TRTEngineOp nodes."
+  )
+
+  # Deleting the references to `<EngineName>_native_segment`s.
+  # This helps TRTEngineOp constructor to not look for native segment handles
+  # during construction of graph for inference.
+  for node in input_graph_def.node:
+    if node.op == "TRTEngineOp":
+      del node.attr["segment_func"]
+  for func in input_graph_def.library.function:
+    for node in func.node_def:
+      if node.op == "TRTEngineOp":
+        del node.attr["segment_func"]
+  # Reconstruct the converted_func with the new graph
+  new_func = _construct_function_from_graph_def(input_func, input_graph_def)
+
+  return new_func
+
+
+class _TRTEngineResource(resource.TrackableResource):
   """Class to track the serialized engines resource."""
 
   def __init__(self,
@@ -903,7 +935,7 @@ class _TRTEngineResource(tracking.TrackableResource):
     self._resource_name = resource_name
     # Track the serialized engine file in the SavedModel.
     self._filename = self._track_trackable(
-        tracking.Asset(filename), "_serialized_trt_resource_filename")
+        asset.Asset(filename), "_serialized_trt_resource_filename")
     self._maximum_cached_engines = maximum_cached_engines
     self._dla_core = dla_core
     self._dla_fallback_layers = dla_fallback_layers
@@ -946,16 +978,29 @@ def _construct_function_from_graph_def(func, graph_def, frozen_func=None):
   """Rebuild function from graph_def."""
   if frozen_func is None:
     frozen_func = func
-  rebuilt_func = wrap_function.function_from_graph_def(
+
+  # If a function is converted, then the TF context contains the original
+  # function while the converted_graph_def contains the converted function.
+  # Remove the original function from the TF context in this case.
+  for f in graph_def.library.function:
+    while context.context().has_function(f.signature.name):
+      context.context().remove_function(f.signature.name)
+
+  captures = {
+      c[1].name.split(":")[0]: c[0]
+      for c in frozen_func.graph.captures
+  }
+  new_func = wrap_function.function_from_graph_def(
       graph_def, [tensor.name for tensor in frozen_func.inputs],
-      [tensor.name for tensor in frozen_func.outputs])
-  rebuilt_func.graph.structured_outputs = nest.pack_sequence_as(
-      func.graph.structured_outputs, rebuilt_func.graph.structured_outputs)
+      [tensor.name for tensor in frozen_func.outputs], captures)
+  new_func.graph.structured_outputs = nest.pack_sequence_as(
+      func.graph.structured_outputs, new_func.graph.structured_outputs)
+
   # Copy structured input signature from original function (used during
   # serialization)
-  rebuilt_func.graph.structured_input_signature = (
-      func.structured_input_signature)
-  return rebuilt_func
+  new_func.graph.structured_input_signature = (func.structured_input_signature)
+
+  return new_func
 
 
 def _apply_inlining(func):
@@ -1002,7 +1047,41 @@ def _apply_inlining(func):
 
   new_graph_def = tf_optimizer.OptimizeGraph(config, meta_graph)
 
-  return _construct_function_from_graph_def(func, new_graph_def)
+  return new_graph_def
+
+
+def _annotate_variable_ops(func, graph_def):
+  """Annotates variable operations with custom `_shape` attribute.
+
+  This is required for the converters and shape inference. The graph
+  definition is modified in-place.
+
+  Args:
+    func: Function represented by the graph definition.
+    graph_def: Graph definition to be annotated in-place.
+
+  Raises:
+    RuntimeError: if some shapes cannot be annotated.
+  """
+  ph_shape_map = {}
+  for ph, var in zip(func.graph.internal_captures, func.variables):
+    ph_shape_map[ph.name] = var.shape
+  # Construct a mapping of node names to nodes
+  name_to_node = {node.name: node for node in graph_def.node}
+  # Go through all the ReadVariableOp nodes in the graph def
+  for node in graph_def.node:
+    if node.op == "ReadVariableOp" or node.op == "ResourceGather":
+      node_ = node
+      # Go up the chain of identities to find a placeholder
+      while name_to_node[node_.input[0]].op == "Identity":
+        node_ = name_to_node[node_.input[0]]
+      ph_name = node_.input[0] + ":0"
+      if ph_name in ph_shape_map:
+        shape = ph_shape_map[ph_name]
+        node.attr["_shape"].shape.CopyFrom(shape.as_proto())
+      else:
+        raise RuntimeError(
+            "Not found in the function captures: {}".format(ph_name))
 
 
 def _save_calibration_table(node):
@@ -1015,12 +1094,21 @@ def _save_calibration_table(node):
 
 
 def _convert_to_tensor(inp):
-  if isinstance(inp, dict):
-    args = []
-    kwargs = {k: ops.convert_to_tensor(v) for k, v in inp.items()}
-  else:
-    args = map(ops.convert_to_tensor, inp)
-    kwargs = {}
+  try:
+    if isinstance(inp, dict):
+      args = []
+      kwargs = {k: ops.convert_to_tensor(v) for k, v in inp.items()}
+    else:
+      kwargs = {}
+      if isinstance(inp, (list, tuple)):
+        args = map(ops.convert_to_tensor, inp)
+      else:
+        args = [ops.convert_to_tensor(inp)]
+  except:
+    error_msg = "Failed to convert input to tensor."
+    logging.error(error_msg + "\ninp = `{0}`\n".format(inp))
+    raise RuntimeError(error_msg)
+
   return args, kwargs
 
 
@@ -1126,8 +1214,6 @@ class TrtGraphConverterV2(object):
        inputs with the same dimensions as the input it is created for. The GPU
        engine will be run with optimal performance with such inputs.
      * `Range+Optimal`: create the profiles for both `Range` and `Optimal`.
-     * `ImplicitBatchModeCompatible`: create the profiles that will produce the
-       same GPU engines as the implicit_batch_mode would produce.
   """
 
   def _verify_profile_strategy(self, strategy):
@@ -1136,6 +1222,11 @@ class TrtGraphConverterV2(object):
       raise ValueError(
           ("profile_strategy '{}' is not supported. It should be one of {}"
           ).format(strategy, supported_profile_strategies()))
+    if strategy == "ImplicitBatchModeCompatible":
+      logging.warn(
+          "ImplicitBatchModeCompatible strategy is deprecated, and"
+          " using it may result in errors during engine building. Please"
+          " consider using a different profile strategy.")
 
   @deprecation.deprecated_args(None,
                                "Use individual converter parameters instead",
@@ -1147,7 +1238,6 @@ class TrtGraphConverterV2(object):
                use_dynamic_shape=None,
                dynamic_shape_profile_strategy=None,
                max_workspace_size_bytes=DEFAULT_TRT_MAX_WORKSPACE_SIZE_BYTES,
-               enable_sparse_compute=True,
                precision_mode=TrtPrecisionMode.FP32,
                minimum_segment_size=3,
                maximum_cached_engines=1,
@@ -1172,10 +1262,6 @@ class TrtGraphConverterV2(object):
       max_workspace_size_bytes: the maximum GPU temporary memory that the TRT
         engine can use at execution time. This corresponds to the
         'workspaceSize' parameter of nvinfer1::IBuilder::setMaxWorkspaceSize().
-      enable_sparse_compute: only effective with TensorRT 8 and newer with an
-        NVIDIA Ampere GPU or newer. It allows TensorRT to take advantage of
-        sparse compute capability of TensorCores. By default, this parameter is
-        set to True. Can be turned off for debuging reason.
       precision_mode: one of the strings in
         TrtPrecisionMode.supported_precision_modes().
       minimum_segment_size: the minimum number of nodes required for a subgraph
@@ -1214,7 +1300,6 @@ class TrtGraphConverterV2(object):
           precision_mode=precision_mode,
           minimum_segment_size=minimum_segment_size,
           maximum_cached_engines=maximum_cached_engines,
-          enable_sparse_compute=enable_sparse_compute,
           use_calibration=use_calibration,
           allow_build_at_runtime=allow_build_at_runtime,
           dla_core=dla_core,
@@ -1249,6 +1334,12 @@ class TrtGraphConverterV2(object):
       self._use_dynamic_shape = False
     else:
       self._use_dynamic_shape = use_dynamic_shape
+
+    if not self.freeze and not self._use_dynamic_shape:
+      logging.warn(
+          "Disabling graph freezing is only possible in dynamic shape mode."
+          " The graph will be frozen.")
+      self.freeze = True
 
     self._profile_strategy = "Unknown"
     if self._use_dynamic_shape:
@@ -1363,7 +1454,9 @@ class TrtGraphConverterV2(object):
     if self.freeze:
       frozen_func = convert_to_constants.convert_variables_to_constants_v2(func)
     else:
-      frozen_func = _apply_inlining(func)
+      inlined_graph_def = _apply_inlining(func)
+      _annotate_variable_ops(func, inlined_graph_def)
+      frozen_func = _construct_function_from_graph_def(func, inlined_graph_def)
     frozen_graph_def = frozen_func.graph.as_graph_def()
 
     # Clear any prior device assignments
@@ -1389,15 +1482,6 @@ class TrtGraphConverterV2(object):
 
     # Run TRT optimizer in Grappler to convert the graph.
     self._converted_graph_def = self._run_conversion(grappler_meta_graph_def)
-    # If a function is converted, then the TF context contains the original
-    # function while the converted_graph_def contains the converted function.
-    # Remove the original function from the TF context in this case.
-    for f in self._converted_graph_def.library.function:
-      while context.context().has_function(f.signature.name):
-        logging.info("Removing original function %s from the context",
-                     f.signature.name)
-        context.context().remove_function(f.signature.name)
-
     self._converted_func = _construct_function_from_graph_def(
         func, self._converted_graph_def, frozen_func)
 
@@ -1430,16 +1514,29 @@ class TrtGraphConverterV2(object):
     will be performed while we build the TensorRT engines.
 
     Args:
-      input_fn: a generator function that yields input data as a list or tuple
-        or dict, which will be used to execute the converted signature to
-        generate TRT engines. Example:
-        `def input_fn(): # Let's assume a network with 2 input tensors. We
-          generate 3 sets
-             # of dummy input data: input_shapes = [[(1, 16), (2, 16)], # 1st
-               input list [(2, 32), (4, 32)], # 2nd list of two tensors [(4,
-               32), (8, 32)]] # 3rd input list
-             for shapes in input_shapes: # return a list of input tensors yield
-               [np.zeros(x).astype(np.float32) for x in shapes]`
+      input_fn: a generator function that provides the input data as a single
+        array, OR a list or tuple of the arrays OR a dict, which will be used
+        to execute the converted signature to generate TRT engines.
+        Example 1:
+        `def input_fn():
+             # Let's assume a network with 1 input tensor.
+             # We generate 2 sets of dummy input data:
+             input_shapes = [(1, 16),    # 1st shape
+                             (2, 32)]    # 2nd shape
+             for shapes in input_shapes:
+                 # return an input tensor
+                 yield np.zeros(shape).astype(np.float32)'
+
+        Example 2:
+        `def input_fn():
+             # Let's assume a network with 2 input tensors.
+             # We generate 3 sets of dummy input data:
+             input_shapes = [[(1, 16), (2, 16)], # 1st input list
+                             [(2, 32), (4, 32)], # 2nd list of two tensors
+                             [(4, 32), (8, 32)]] # 3rd input list
+             for shapes in input_shapes:
+                 # return a list of input tensors
+                 yield [np.zeros(x).astype(np.float32) for x in shapes]`
 
     Raises:
       NotImplementedError: build() is already called.
@@ -1478,7 +1575,7 @@ class TrtGraphConverterV2(object):
     #   Builds TRT engines if self._need_trt_profiles is False.
     #   Builds TRT optimization profiles if self._need_trt_profiles is True.
     for inp in input_fn():
-      if not first_input:
+      if first_input is None:
         first_input = inp
       args, kwargs = _convert_to_tensor(inp)
       func(*args, **kwargs)
@@ -1499,11 +1596,8 @@ class TrtGraphConverterV2(object):
       # the inputs can be used because the shape of this input does not
       # determine the engine and instead the shapes collected in profiles
       # determine the engine.
-      if isinstance(first_input, dict):
-        self._converted_func(
-            **{k: ops.convert_to_tensor(v) for k, v in first_input.items()})
-      else:
-        self._converted_func(*map(ops.convert_to_tensor, first_input))
+      args, kwargs = _convert_to_tensor(first_input)
+      self._converted_func(*args, **kwargs)
 
     self._build_called_once = True
 
@@ -1526,6 +1620,23 @@ class TrtGraphConverterV2(object):
       RuntimeError: if the needed calibration hasn't been done.
     """
     assert self._converted
+
+    # 'remove_native_segments': setting this value to True removes native segments
+    # associated with each TRT engine. This option can be used to reduce the size
+    # of the converted model. Please note that a converted model without native
+    # segments can't be used for collecting profiles, building or re-converting.
+    # The reduced model can only be used for inference when no native segments
+    # are required for computation. When remove_native_segments flag is set to
+    # True, the converted_graph_def needs to be reduced before saved_model
+    # function serialization.
+    if trt_utils.is_experimental_feature_activated("remove_native_segments"):
+      logging.info(
+          "'remove_native_segments' experimental feature is enabled"
+          " during saving of converted SavedModel."
+      )
+      self._converted_func = _remove_native_segments(self._converted_func)
+      self._converted_graph_def = self._converted_func.graph.as_graph_def()
+
     if self._need_calibration and not self._calibrated:
       raise RuntimeError("A model that requires INT8 calibration has to be "
                          "built before saving it. Call build() to build and "
@@ -1568,12 +1679,10 @@ class TrtGraphConverterV2(object):
 
     self._for_each_trt_node(self._converted_graph_def,
                             _serialize_and_track_engine)
-    self._saved_model.trt_engine_resources = resource_map
-
-    # Rewrite the signature map using the optimized ConcreteFunction.
-    signatures = {
-        key: value for key, value in self._saved_model.signatures.items()
-    }
+    # If the graph is frozen, tracked variables are not needed by the converted model.
+    trackable = autotrackable.AutoTrackable(
+    ) if self.freeze else self._saved_model
+    trackable.trt_engine_resources = resource_map
 
     # Set allow_build_at_runtime=False if asked by user.
     #
@@ -1598,9 +1707,9 @@ class TrtGraphConverterV2(object):
           self._converted_func.structured_input_signature)
       self._converted_func = reset_converted_func
 
-    signatures[self._input_saved_model_signature_key] = self._converted_func
-    save.save(
-        self._saved_model, output_saved_model_dir, signatures, options=options)
+    # Rewrite the signature map using the optimized ConcreteFunction.
+    signatures = {self._input_saved_model_signature_key: self._converted_func}
+    save.save(trackable, output_saved_model_dir, signatures, options=options)
 
   def summary(self, line_length=160, detailed=True, print_fn=None):
     """This method describes the results of the conversion by TF-TRT.

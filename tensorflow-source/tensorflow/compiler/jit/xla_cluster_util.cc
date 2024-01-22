@@ -37,12 +37,10 @@ limitations under the License.
 #include "tensorflow/core/public/session_options.h"
 #include "tensorflow/core/util/device_name_utils.h"
 #include "tensorflow/core/util/xla_config_registry.h"
-#include "tensorflow/core/util/env_var.h"
 
 namespace tensorflow {
 
 const char* const kXlaClusterAttr = "_XlaCluster";
-const char* const kXlaOutsideCompilationAttr = "_XlaOutsideCompilation";
 const char* const kXlaCompileTimeConstantInputsAttr =
     "_XlaCompileTimeConstantInputs";
 
@@ -90,18 +88,6 @@ string DescribeCycle(const GraphCycles* cycles, const Graph& graph, int src,
 bool AlwaysForwardsRefInput(const Node& node) { return node.IsIdentity(); }
 
 }  // namespace
-
-absl::flat_hash_set<string> GetBlacklistedDynamicOps() {
-  absl::flat_hash_set<string> result{"Where", "Unique"};
-  string blacklisted_ops;
-  TF_CHECK_OK(ReadStringFromEnvVar("TF_XLA_DYNAMIC_OPS", "",
-  &blacklisted_ops)); if (!blacklisted_ops.empty()) {
-    for (auto op : absl::StrSplit(blacklisted_ops, ',')) {
-      result.insert(string(op));
-    }
-  }
-  return result;
-}
 
 bool HasForwardedRefInput(const Node& node) {
   if (AlwaysForwardsRefInput(node)) {
@@ -211,14 +197,14 @@ StatusOr<bool> CreateCycleDetectionGraph(const Graph* graph,
   return true;
 }
 
-absl::optional<absl::string_view> GetXlaClusterForNode(const Node& node) {
+std::optional<absl::string_view> GetXlaClusterForNode(const Node& node) {
   const AttrValue* attr_value = node.attrs().Find(kXlaClusterAttr);
   if (attr_value == nullptr) {
-    return absl::nullopt;
+    return std::nullopt;
   }
   Status s = AttrValueHasType(*attr_value, "string");
   if (!s.ok()) {
-    return absl::nullopt;
+    return std::nullopt;
   }
   return attr_value->s();
 }
@@ -375,7 +361,7 @@ XlaAutoClusteringSummary GetXlaAutoClusteringSummary(const Graph& graph) {
   absl::flat_hash_map<absl::string_view, int> unclustered_op_histogram;
 
   for (Node* n : graph.nodes()) {
-    absl::optional<absl::string_view> cluster_name = GetXlaClusterForNode(*n);
+    std::optional<absl::string_view> cluster_name = GetXlaClusterForNode(*n);
     if (cluster_name) {
       result.set_clustered_node_count(result.clustered_node_count() + 1);
       ClusterInfo* info = &cluster_name_to_info[*cluster_name];
@@ -571,7 +557,7 @@ Status GetNodesRelatedToRefVariablesInDirection(
 
   VLOG(2) << "# iterations = " << iterations;
 
-  return Status::OK();
+  return OkStatus();
 }
 
 // Sorts control inputs of a graphdef so that they are deterministically

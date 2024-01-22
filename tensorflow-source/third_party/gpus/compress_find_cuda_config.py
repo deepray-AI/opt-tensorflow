@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
-"""Compresses the contents of 'find_cuda.py'.
+"""Compresses the contents of 'find_cuda_config.py'.
 
 The compressed file is what is actually being used. It works around remote
 config not being able to upload files yet.
@@ -34,4 +34,3 @@ def main():
 
 if __name__ == '__main__':
   main()
-

@@ -19,6 +19,7 @@ import os
 
 from tensorflow.core.framework import attr_value_pb2
 from tensorflow.core.protobuf import saved_model_pb2
+from tensorflow.python.compiler.tensorrt import trt_convert
 from tensorflow.python.compiler.tensorrt.test import tf_trt_integration_test_base as trt_test
 from tensorflow.python.compiler.tensorrt.test.tf_trt_integration_test_base import GraphState
 from tensorflow.python.compiler.tensorrt.test.tf_trt_integration_test_base import IsQuantizationWithCalibration
@@ -47,8 +48,8 @@ class TfFunctionTest(trt_test.TfTrtIntegrationTestBase):
         "_tftrt_convert_function": True,
         "_tftrt_trt_logger_name": "DefaultLogger",
         "_tftrt_max_batch_size": 10,
-        "_tftrt_max_workspace_size_bytes": 1 << 25,
-        "_tftrt_enable_sparse_compute": True,
+        "_tftrt_max_workspace_size_bytes":
+            (trt_convert.DEFAULT_TRT_MAX_WORKSPACE_SIZE_BYTES),
         "_tftrt_precision_mode": "FP16",
         "_tftrt_minimum_segment_size": 2,
         "_tftrt_is_dyn_op": True,
@@ -160,10 +161,6 @@ class TfFunctionTest(trt_test.TfTrtIntegrationTestBase):
         func_def=func_def,
         param_name="_tftrt_max_workspace_size_bytes",
         attr_value_type="i")
-    self._copy_test_attr_to_func_def(
-        func_def=func_def,
-        param_name="_tftrt_enable_sparse_compute",
-        attr_value_type="b")
     self._copy_test_attr_to_func_def(
         func_def=func_def,
         param_name="_tftrt_precision_mode",

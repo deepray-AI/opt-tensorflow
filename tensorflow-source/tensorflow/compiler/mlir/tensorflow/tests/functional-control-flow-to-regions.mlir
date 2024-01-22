@@ -14,9 +14,9 @@ func.func @testIf1Result(%arg0: tensor<i1>, %arg1: tensor<*xf32>) -> tensor<*xf3
   } : (tensor<i1>, tensor<*xf32>) -> tensor<*xf32>
 
   // CHECK: "tf.IfRegion"
-  // CHECK: [[Result0:%.*]] = call @testIf1Then
+  // CHECK: [[Result0:%.*]] = func.call @testIf1Then
   // CHECK: "tf.Yield"([[Result0]])
-  // CHECK: [[Result1:%.*]] = call @testIf1Else
+  // CHECK: [[Result1:%.*]] = func.call @testIf1Else
   // CHECK: "tf.Yield"([[Result1]])
   // CHECK: _attr0 = 10
   // CHECK-SAME: _attr1 = true
@@ -47,10 +47,10 @@ func.func @testIf2Result(%arg0: tensor<i1>, %arg1: tensor<2xf32>) -> tensor<2xf3
 
   // CHECK: "tf.IfRegion"
   // CHECK: "tf.Cast"
-  // CHECK: [[Result0:%.*]] = call @testIf1Then
+  // CHECK: [[Result0:%.*]] = func.call @testIf1Then
   // CHECK: "tf.Yield"([[Result0]])
   // CHECK: "tf.Cast"
-  // CHECK: [[Result1:%.*]] = call @testIf1Else
+  // CHECK: [[Result1:%.*]] = func.call @testIf1Else
   // CHECK: "tf.Yield"([[Result1]])
   func.return %0 : tensor<2xf32>
 }
@@ -70,9 +70,9 @@ func.func @testIfNoInputs(%arg0: tensor<i1>) -> tensor<2xf32> {
   } : (tensor<i1>) -> tensor<2xf32>
 
   // CHECK: "tf.IfRegion"
-  // CHECK: [[Result0:%.*]] = call @testIf1Then
+  // CHECK: [[Result0:%.*]] = func.call @testIf1Then
   // CHECK: "tf.Yield"([[Result0]])
-  // CHECK: [[Result1:%.*]] = call @testIf1Else
+  // CHECK: [[Result1:%.*]] = func.call @testIf1Else
   // CHECK: "tf.Yield"([[Result1]])
   func.return %0 : tensor<2xf32>
 }
@@ -146,6 +146,24 @@ func.func @testIf1Result(%arg0: tensor<i32>, %arg1: tensor<*xf32>) -> tensor<*xf
 
 // -----
 
+func.func private @branch_0(%arg0: tensor<!tf_type.resource>) -> tensor<*xf32>
+func.func private @branch_1(%arg0: tensor<!tf_type.resource>) -> tensor<*xf32>
+
+// CHECK-LABEL: func @testCase(%arg0: tensor<i32>, %arg1: tensor<!tf_type.resource<tensor<1x2x3xf32>>>)
+func.func @testCase(%arg0: tensor<i32>, %arg1: tensor<!tf_type.resource<tensor<1x2x3xf32>>>) -> tensor<1x2x3xf32> {
+  %0 = "tf.Case"(%arg0, %arg1) {branches = [@branch_0, @branch_1], is_stateless = false} : (tensor<i32>, tensor<!tf_type.resource<tensor<1x2x3xf32>>>) -> tensor<1x2x3xf32>
+
+  // CHECK: [[Result0:%.*]] = "tf.CaseRegion"
+  // CHECK: [[Result1:%.*]] = func.call @branch_0
+  // CHECK: "tf.Yield"([[Result1]])
+  // CHECK: [[Result2:%.*]] = func.call @branch_1
+  // CHECK: "tf.Yield"([[Result2]])
+  // CHECK: return [[Result0]]
+  func.return %0 : tensor<1x2x3xf32>
+}
+
+// -----
+
 // Simple While
 func.func private @testWhileCond(tensor<*xf32>) -> (tensor<i1>)
 func.func private @testWhileBody(tensor<*xf32>) -> (tensor<*xf32>)
@@ -161,9 +179,9 @@ func.func @testWhileResult(tensor<*xf32>) -> (tensor<*xf32>) {
   } : (tensor<*xf32>) -> (tensor<*xf32>)
 
   // CHECK: [[Result0:%.*]] = "tf.WhileRegion"
-  // CHECK: [[Result1:%.*]] = call @testWhileCond
+  // CHECK: [[Result1:%.*]] = func.call @testWhileCond
   // CHECK: "tf.Yield"([[Result1]])
-  // CHECK: [[Result2:%.*]] = call @testWhileBody
+  // CHECK: [[Result2:%.*]] = func.call @testWhileBody
   // CHECK: "tf.Yield"([[Result2]])
   // CHECK: _attr0 = 10
   // CHECK-SAME: _attr1 = true
@@ -190,7 +208,7 @@ func.func @testWhileResultNoIO() -> () {
   } : () -> ()
 
   // CHECK: "tf.WhileRegion"
-  // CHECK: [[Result1:%.*]] = call @testWhileCond
+  // CHECK: [[Result1:%.*]] = func.call @testWhileCond
   // CHECK: "tf.Yield"([[Result1]])
   // CHECK: call @testWhileBody
   // CHECK: "tf.Yield"()
@@ -214,10 +232,10 @@ func.func @testWhileResult(tensor<*xf32>) -> (tensor<*xf32>) {
 
   // CHECK: [[Result0:%.*]] = "tf.WhileRegion"
   // CHECK: ^bb0(%[[CARG0:.*]]: tensor<4xf32>
-  // CHECK: [[Result1:%.*]] = call @testWhileCond(%[[CARG0]])
+  // CHECK: [[Result1:%.*]] = func.call @testWhileCond(%[[CARG0]])
   // CHECK: "tf.Yield"([[Result1]])
   // CHECK: ^bb0(%[[BARG0:.*]]: tensor<4xf32>
-  // CHECK: [[Result2:%.*]] = call @testWhileBody(%[[BARG0]])
+  // CHECK: [[Result2:%.*]] = func.call @testWhileBody(%[[BARG0]])
   // CHECK: "tf.Yield"([[Result2]])
   // CHECK: return [[Result0]]
   func.return %1 : tensor<*xf32>
@@ -240,10 +258,10 @@ func.func @testWhileResult(tensor<*xf32>) -> (tensor<*xf32>) {
   } : (tensor<*xf32>) -> (tensor<*xf32>)
 
   // CHECK: [[Result0:%.*]] = "tf.WhileRegion"
-  // CHECK: [[Result1:%.*]] = call @testWhileCond
+  // CHECK: [[Result1:%.*]] = func.call @testWhileCond
   // CHECK: [[ToBool:%.*]] = "tf.ToBool"([[Result1]])
   // CHECK: "tf.Yield"([[ToBool]])
-  // CHECK: [[Result2:%.*]] = call @testWhileBody
+  // CHECK: [[Result2:%.*]] = func.call @testWhileBody
   // CHECK: "tf.Yield"([[Result2]])
   // CHECK: return [[Result0]]
   func.return %1 : tensor<*xf32>

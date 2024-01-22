@@ -1,6 +1,7 @@
 load("//tensorflow:tensorflow.bzl", "py_test")
 
 package(
+    # copybara:uncomment default_applicable_licenses = ["//tensorflow:license"],
     default_visibility = ["//tensorflow:internal"],
     licenses = ["notice"],
 )
@@ -16,6 +17,9 @@ py_library(
         "//tensorflow/python:framework_ops",
         "//tensorflow/python:training",
         "//tensorflow/python/debug/lib:debug_utils",
+        "//tensorflow/python/platform:tf_logging",
+        "//tensorflow/python/util:compat",
+        "//tensorflow/python/util:nest",
     ],
 )
 
@@ -23,15 +27,12 @@ py_library(
     name = "dumping_wrapper",
     srcs = ["dumping_wrapper.py"],
     srcs_version = "PY3",
-    visibility = [
-        "//tensorflow:internal",
-        "//third_party/py/tf_slim:__subpackages__",
-    ],
+    visibility = ["//tensorflow:internal"],
     deps = [
         ":framework",
         "//tensorflow/core:protos_all_py",
-        "//tensorflow/python:platform",
         "//tensorflow/python/debug/lib:debug_data",
+        "//tensorflow/python/platform:gfile",
     ],
 )
 
@@ -104,9 +105,9 @@ py_test(
         "//tensorflow/python:platform_test",
         "//tensorflow/python:resource_variable_ops",
         "//tensorflow/python:training",
-        "//tensorflow/python:util",
         "//tensorflow/python:variables",
         "//tensorflow/python/debug/lib:debug_data",
+        "//tensorflow/python/util:tf_decorator",
         "//third_party/py/numpy",
     ],
 )
@@ -125,12 +126,12 @@ py_test(
         "//tensorflow/python:client",
         "//tensorflow/python:framework_for_generated_wrappers",
         "//tensorflow/python:framework_test_lib",
-        "//tensorflow/python:platform",
         "//tensorflow/python:platform_test",
         "//tensorflow/python:state_ops",
         "//tensorflow/python:training",
-        "//tensorflow/python:variables",
+        "//tensorflow/python:variable_v1",
         "//tensorflow/python/debug/lib:debug_data",
+        "//tensorflow/python/platform:gfile",
     ],
 )
 
@@ -154,6 +155,7 @@ py_test(
         "//tensorflow/python:resource_variable_ops",
         "//tensorflow/python:state_ops",
         "//tensorflow/python:training",
+        "//tensorflow/python:variable_v1",
         "//tensorflow/python:variables",
         "//tensorflow/python/debug/cli:cli_shared",
         "//tensorflow/python/debug/cli:debugger_cli_common",

@@ -404,6 +404,7 @@ def _find_curand_config(base_paths, required_version, cuda_version):
       "curand_library_dir": os.path.dirname(library_path),
   }
 
+
 def _find_cufft_config(base_paths, required_version, cuda_version):
 
   if (_at_least_version(cuda_version, "11.0") or (_is_aarch64 and _at_least_version(cuda_version, "10.2"))):
@@ -455,27 +456,6 @@ def _find_cudnn_config(base_paths, required_version):
       "cudnn_library_dir": os.path.dirname(library_path),
   }
 
-def _find_cutensor_config(base_paths, required_version):
-
-  def get_header_version(path):
-    version = [
-        _get_header_version(path, name)
-        for name in ("CUTENSOR_MAJOR", "CUTENSOR_MINOR", "CUTENSOR_PATCH")]
-    return ".".join(version) if version[0] else None
-
-  header_path, header_version = _find_header(base_paths,
-                                             ("cutensor.h", "/cutensor/types.h"),
-                                             required_version,
-                                             get_header_version)
-  cutensor_version = header_version.split(".")[0]
-
-  library_path = _find_library(base_paths, "cutensor", cutensor_version)
-
-  return {
-      "cutensor_version": cutensor_version,
-      "cutensor_include_dir": os.path.dirname(header_path),
-      "cutensor_library_dir": os.path.dirname(library_path),
-  }
 
 def _find_cusparse_config(base_paths, required_version, cuda_version):
 
@@ -567,10 +547,9 @@ def _list_from_env(env_name, default=[]):
 def _get_legacy_path(env_name, default=[]):
   """Returns a path specified by a legacy environment variable.
 
-  CUDNN_INSTALL_PATH, CUTENSOR_INSTALL_PATH, NCCL_INSTALL_PATH,
-  TENSORRT_INSTALL_PATH set to '/usr/lib/x86_64-linux-gnu' would previously find
-  both library and header paths. Detect those and return '/usr', otherwise
-  forward to _list_from_env().
+  CUDNN_INSTALL_PATH, NCCL_INSTALL_PATH, TENSORRT_INSTALL_PATH set to
+  '/usr/lib/x86_64-linux-gnu' would previously find both library and header
+  paths. Detect those and return '/usr', otherwise forward to _list_from_env().
   """
   if env_name in os.environ:
     match = re.match("^(/[^/ ]*)+/lib/\w+-linux-gnu/?$", os.environ[env_name])
@@ -635,11 +614,6 @@ def find_cuda_config():
     cusparse_version = os.environ.get("TF_CUSPARSE_VERSION", "")
     result.update(
         _find_cusparse_config(cusparse_paths, cusparse_version, cuda_version))
-    
-    if "cutensor" in libraries:
-      cutensor_paths = _get_legacy_path("CUTENSOR_INSTALL_PATH", base_paths)
-      cutensor_version = os.environ.get("TF_CUTENSOR_VERSION", "")
-      result.update(_find_cutensor_config(cutensor_paths, cutensor_version))
 
   if "cudnn" in libraries:
     cudnn_paths = _get_legacy_path("CUDNN_INSTALL_PATH", base_paths)
@@ -655,7 +629,7 @@ def find_cuda_config():
     tensorrt_paths = _get_legacy_path("TENSORRT_INSTALL_PATH", base_paths)
     tensorrt_version = os.environ.get("TF_TENSORRT_VERSION", "")
     result.update(_find_tensorrt_config(tensorrt_paths, tensorrt_version))
-    
+
   for k, v in result.items():
     if k.endswith("_dir") or k.endswith("_path"):
       result[k] = _normalize_path(v)

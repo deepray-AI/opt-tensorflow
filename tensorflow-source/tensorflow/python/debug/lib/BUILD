@@ -1,7 +1,8 @@
-load("//tensorflow:tensorflow.bzl", "cuda_py_test")
+load("//tensorflow:tensorflow.default.bzl", "cuda_py_test")
 load("//tensorflow:tensorflow.bzl", "py_binary", "py_test")
 
 package(
+    # copybara:uncomment default_applicable_licenses = ["//tensorflow:license"],
     default_visibility = ["//tensorflow:internal"],
     licenses = ["notice"],
 )
@@ -22,6 +23,9 @@ py_library(
         "//tensorflow/python:array_ops",
         "//tensorflow/python:debug_ops_gen",
         "//tensorflow/python:op_callbacks",
+        "//tensorflow/python/platform:tf_logging",
+        "//tensorflow/python/util:compat",
+        "//tensorflow/python/util:tf_export",
         "//third_party/py/numpy",
     ],
 )
@@ -37,6 +41,10 @@ py_library(
         "//tensorflow/python:array_ops",
         "//tensorflow/python:debug_ops_gen",
         "//tensorflow/python:op_callbacks",
+        "//tensorflow/python/platform:tf_logging",
+        "//tensorflow/python/util:compat",
+        "//tensorflow/python/util:tf_export",
+        "//tensorflow/python/util:tf_stack",
         "//third_party/py/numpy",
     ],
 )
@@ -67,7 +75,7 @@ py_library(
         "//tensorflow/core:protos_all_py",
         "//tensorflow/python:framework",
         "//tensorflow/python:lib",
-        "@six_archive//:six",
+        "//tensorflow/python/util:compat",
     ],
 )
 
@@ -101,9 +109,8 @@ py_library(
         "//tensorflow/core:protos_all_py",
         "//tensorflow/python:framework",
         "//tensorflow/python:op_def_registry",
-        "//tensorflow/python:platform",
         "//tensorflow/python:tensor_util",
-        "@six_archive//:six",
+        "//tensorflow/python/platform:tf_logging",
     ],
 )
 
@@ -120,10 +127,11 @@ py_library(
         "//tensorflow/core:protos_all_py",
         "//tensorflow/python:framework",
         "//tensorflow/python:op_def_registry",
-        "//tensorflow/python:platform",
         "//tensorflow/python:tensor_util",
+        "//tensorflow/python/platform:gfile",
+        "//tensorflow/python/platform:tf_logging",
+        "//tensorflow/python/util:compat",
         "//third_party/py/numpy",
-        "@six_archive//:six",
     ],
 )
 
@@ -136,8 +144,6 @@ py_library(
         ":debug_graphs",
         "//tensorflow/python:array_ops",
         "//tensorflow/python:framework",
-        "//tensorflow/python:platform",
-        "@six_archive//:six",
     ],
 )
 
@@ -163,8 +169,8 @@ py_library(
     srcs_version = "PY3",
     deps = [
         "//tensorflow/core:protos_all_py",
-        "//tensorflow/python:platform",
         "//tensorflow/python:training",
+        "//tensorflow/python/platform:tf_logging",
     ],
 )
 
@@ -186,6 +192,7 @@ py_library(
         ":common",
         ":debug_service_pb2_grpc",
         "//tensorflow/core/debug:debug_service_proto_py",
+        "//tensorflow/python/platform:gfile",
         "//tensorflow/python/profiler:tfprof_logger",
     ],
 )
@@ -229,6 +236,7 @@ py_test(
         "//tensorflow/core:protos_all_py",
         "//tensorflow/python:client_testlib",
         "//tensorflow/python:framework_test_lib",
+        "//tensorflow/python/platform:test",
         "//third_party/py/numpy",
     ],
 )
@@ -249,6 +257,7 @@ py_test(
         "//tensorflow/core:protos_all_py",
         "//tensorflow/python:client_testlib",
         "//tensorflow/python:framework_test_lib",
+        "//tensorflow/python/platform:test",
     ],
 )
 
@@ -277,8 +286,8 @@ py_test(
         "//tensorflow/core:protos_all_py",
         "//tensorflow/python:client_testlib",
         "//tensorflow/python:framework_test_lib",
-        "//tensorflow/python:platform",
         "//tensorflow/python:platform_test",
+        "//tensorflow/python/platform:gfile",
         "//third_party/py/numpy",
     ],
 )
@@ -295,9 +304,11 @@ cuda_py_test(
     deps = [
         ":check_numerics_callback",
         "//tensorflow/python:framework_test_lib",
+        "//tensorflow/python:gradient_checker_v2",
         "//tensorflow/python:math_ops",
         "//tensorflow/python:platform_test",
         "//tensorflow/python:variables",
+        "//tensorflow/python/platform:client_testlib",
         "//third_party/py/numpy",
     ],
 )
@@ -321,6 +332,8 @@ cuda_py_test(
         "//tensorflow/python:math_ops",
         "//tensorflow/python:platform_test",
         "//tensorflow/python:variables",
+        "//tensorflow/python/platform:client_testlib",
+        "//tensorflow/python/platform:tf_logging",
         "//third_party/py/numpy",
     ],
 )
@@ -382,7 +395,7 @@ py_test(
         "//tensorflow/python:math_ops",
         "//tensorflow/python:platform_test",
         "//tensorflow/python:resource_variable_ops",
-        "//tensorflow/python:variables",
+        "//tensorflow/python:variable_v1",
         "//third_party/py/numpy",
     ],
 )
@@ -404,15 +417,15 @@ py_test(
         "//tensorflow/python:client",
         "//tensorflow/python:cond_v2",
         "//tensorflow/python:constant_op",
-        "//tensorflow/python:control_flow_ops",
         "//tensorflow/python:framework_ops",
         "//tensorflow/python:framework_test_lib",
         "//tensorflow/python:math_ops",
         "//tensorflow/python:platform_test",
         "//tensorflow/python:resource_variable_ops",
-        "//tensorflow/python:util",
         "//tensorflow/python:variables",
+        "//tensorflow/python:while_loop",
         "//tensorflow/python:while_v2",
+        "//tensorflow/python/util:tf_decorator",
         "//third_party/py/numpy",
     ],
 )
@@ -439,8 +452,8 @@ py_test(
         "//tensorflow/python:math_ops",
         "//tensorflow/python:platform_test",
         "//tensorflow/python:resource_variable_ops",
-        "//tensorflow/python:util",
         "//tensorflow/python:variables",
+        "//tensorflow/python/util:tf_decorator",
     ],
 )
 
@@ -470,6 +483,7 @@ py_library(
         "//tensorflow/python:array_ops",
         "//tensorflow/python:client",
         "//tensorflow/python:client_testlib",
+        "//tensorflow/python:cond",
         "//tensorflow/python:control_flow_ops",
         "//tensorflow/python:data_flow_ops",
         "//tensorflow/python:errors",
@@ -483,9 +497,10 @@ py_library(
         "//tensorflow/python:state_ops",
         "//tensorflow/python:tensor_array_grad",
         "//tensorflow/python:training",
+        "//tensorflow/python:variable_v1",
         "//tensorflow/python:variables",
+        "//tensorflow/python:while_loop",
         "//third_party/py/numpy",
-        "@six_archive//:six",
     ],
 )
 
@@ -507,7 +522,8 @@ py_library(
         ":debug_graphs",
         ":debug_service_pb2_grpc",
         "//tensorflow/core/debug:debug_service_proto_py",
-        "@six_archive//:six",
+        "//tensorflow/python/platform:tf_logging",
+        "//tensorflow/python/util:compat",
     ],
 )
 
@@ -524,6 +540,7 @@ py_library(
         "//tensorflow/python:constant_op",
         "//tensorflow/python:errors",
         "//tensorflow/python:variables",
+        "//tensorflow/python/util:compat",
     ],
 )
 
@@ -540,6 +557,7 @@ cuda_py_test(
         "//tensorflow/python:framework_for_generated_wrappers",
         "//tensorflow/python:math_ops",
         "//tensorflow/python:platform_test",
+        "//tensorflow/python:variable_v1",
         "//tensorflow/python:variables",
     ],
 )
@@ -559,7 +577,7 @@ cuda_py_test(
         "//tensorflow/python:framework_for_generated_wrappers",
         "//tensorflow/python:math_ops",
         "//tensorflow/python:platform_test",
-        "//tensorflow/python:variables",
+        "//tensorflow/python:variable_v1",
     ],
 )
 
@@ -574,11 +592,12 @@ cuda_py_test(
         ":debug_utils",
         "//tensorflow/python:client",
         "//tensorflow/python:client_testlib",
-        "//tensorflow/python:control_flow_ops",
+        "//tensorflow/python:cond",
         "//tensorflow/python:framework_test_lib",
         "//tensorflow/python:math_ops",
         "//tensorflow/python:training",
         "//tensorflow/python:variables",
+        "//tensorflow/python:while_loop",
     ],
 )
 

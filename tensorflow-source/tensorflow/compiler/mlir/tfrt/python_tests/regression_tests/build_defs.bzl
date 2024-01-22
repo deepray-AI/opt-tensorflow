@@ -1,12 +1,14 @@
 """Generate regression test targets."""
 
-load("//tensorflow:tensorflow.bzl", "py_strict_test")
+load("//tensorflow:strict.default.bzl", "py_strict_test")
 
 _ALWAYS_EXCLUDE = ["*.disabled.mlir"]
 _default_test_file_exts = ["mlir"]
 
 def _run_regression_test(name, compare_with_tensorflow, vectorize, data):
-    suffix = ".vectorized.test" if vectorize else ".test"
+    suffix = ".test"
+    if vectorize:
+        suffix = ".vectorized" + suffix
     py_strict_test(
         name = name + suffix,
         srcs = ["compile_and_run_test.py"],
@@ -30,7 +32,10 @@ def _run_regression_test(name, compare_with_tensorflow, vectorize, data):
             "//tensorflow/compiler/mlir/tfrt/jit/python_binding:tf_jitrt",
             "//tensorflow/compiler/mlir/tfrt/jit/python_binding:tfrt_fallback",
             "//tensorflow/python:client_testlib",
-            "//tensorflow/python/platform",
+            "//tensorflow/python/platform:tf_logging",
+            "//tensorflow/python/platform:client_testlib",
+            "//tensorflow/python/platform:resource_loader",
+            "//tensorflow/python/platform:gfile",
         ],
     )
 
@@ -47,6 +52,7 @@ def regression_test(
       name: The name of the test suite.
       vectorize: Whether vectorization should be enabled.
       exclude: The file patterns which should be excluded.
+      comparison_disabled: The files for which comparison with tensorflow should be disabled.
       test_file_exts: The file extensions to be considered as tests.
       data: Any extra data dependencies that might be needed.
     """

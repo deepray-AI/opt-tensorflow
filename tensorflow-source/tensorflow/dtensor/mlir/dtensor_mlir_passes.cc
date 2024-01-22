@@ -93,6 +93,10 @@ void CreateDTensorMLIRPass(const mlir::TF::StandardPipelineOptions &options,
   pm->addPass(mlir::TF::CreateTFFunctionalControlFlowToRegions());
   pm->addPass(mlir::createInlinerPass());
 
+  // An additional shape inference to catch any newly created constants
+  // from canonicalizer.
+  pm->addPass(mlir::TF::CreateTFShapeInferencePass());
+
   // Ensure that all functions have `device_id` as 0th argument.
   pm->addPass(CreateDTensorPropagateDeviceIdToFunctionArgs());
 
@@ -112,6 +116,19 @@ void CreateDTensorMLIRPass(const mlir::TF::StandardPipelineOptions &options,
   // TODO(hongjunchoi): Remove this pass once shape inference pass no longer
   // creates unnecessary constants ops.
   pm->addNestedPass<mlir::func::FuncOp>(CreateDTensorDCE());
+
+  // Canonicalization will merge tf.ConstOp from different DTensorLayout
+  // annotations, causing problem during mesh propagation. Undo the merge
+  // before creating clusters.
+  pm->addNestedPass<mlir::func::FuncOp>(
+      CreateDTensorUndoMergeConstAcrossMesh());
+
+  // Backward functions insert tf.IdentityOp before CopyToMesh's gradient Ops.
+  // These tf.IdentityOp are semantically no-op to DTensor, but stops the
+  // backward mesh propagation into the originating tf.ConstOp. Elide the no-op
+  // tf.IdentityOp to workaround this.
+  pm->addNestedPass<mlir::func::FuncOp>(
+      CreateDTensorElideIdentityBeforeCopyToMesh());
 
   // Propagate mesh cluster config and cluster ops by mesh cluster so that
   // SPMD expansion can be isolated to a single device mesh.
@@ -140,11 +157,20 @@ void CreateDTensorMLIRPass(const mlir::TF::StandardPipelineOptions &options,
 
   AddDTensorEmbeddingPassV2(pm);
 
+  // For DTensor Checkpoint V2, the outputs of tf.RestoreV2 ops
+  // do not have shape information. We can infer the shapes of these
+  // outputs from the tf.AssignVariableOps that consume these outputs.
+  // This pass fills in all missing shapes caused by tf.RestoreV2 ops.
+  pm->addPass(CreateDTensorInferShapesForRestoreV2Op());
+
   pm->addPass(CreateDTensorLayoutPropagationPassV2());
 
   // Expand graph to SPMD form given layouts are annotated to all ops.
   // Remove all DTensorLayout ops after the expansion is done.
   pm->addPass(CreateDTensorSPMDExpansion());
+
+  // Insert functions to save or load embeddings when using tpu device.
+  AddDTensorEmbeddingCheckpointPass(pm);
 
   // Expand all ops that consume SparseTensors to possibly new ops.
   // Remove any unused SparseToDense, Layout, and Const Ops after
@@ -207,6 +233,8 @@ void CreateDTensorMLIRPass(const mlir::TF::StandardPipelineOptions &options,
 
   pm->addPass(CreateDTensorAllScatterLoweringPass());
 
+  pm->addPass(CreateDTensorAllToAllLoweringPass());
+
   // Group together multiple device clusters assigned to the same mesh. Repeat
   // this for every mesh to support multi-mesh. Collective lowering may have
   // created multiple CPU mesh clusters for executing collective operations on
@@ -258,6 +286,22 @@ void CreateDTensorMLIRPass(const mlir::TF::StandardPipelineOptions &options,
     pm->addPass(mlir::TFDevice::CreateResourceOpLiftingPass());
     pm->addPass(mlir::TFDevice::CreateClusterOutliningPass());
 
+    // Prepare for XLA SPMD integration for XLA SPMD mesh. If there are layout
+    // operations on XLA SPMD mesh, then convert all of them to appropriate
+    // XLA sharding attributes.
+    pm->addPass(CreateDTensorSetHloShardingPass(
+        /*check_layout_use_xla_spmd=*/true));
+    pm->addPass(CreateDTensorReplaceAuxiliaryDTensorLayoutOpPass());
+    pm->addNestedPass<mlir::func::FuncOp>(
+        CreateDTensorLayoutToXlaShardingOpPass());
+    // We lower all remaining Relayout to Identity here to make XLA happy.
+    // Under XLA SPMD the RelayoutOp is not expanded by DTensor's SPMD expander.
+    // Note that we do not lower much earlier because
+    // canonicalization / const folding may produce chains of
+    // DTensorLayout that confuses DTensorReplaceAuxiliaryDTensorLayoutOpPass.
+    pm->addNestedPass<mlir::func::FuncOp>(
+        CreateDTensorReplaceRelayoutWithIdentityPass());
+
     // Rename functions with unique names, to avoid collisions in the function
     // library.
     pm->addPass(CreateFunctionRenamingPass());
@@ -273,13 +317,18 @@ void CreateDTensorMLIRPass(const mlir::TF::StandardPipelineOptions &options,
 
     // Convert compilation and replication attributes to unified attributes
     // expected by TPURewritePass.
-    pm->addNestedPass<mlir::FuncOp>(
-        mlir::TFTPU::CreateCanonicalizeCompileAndReplicateAttributesPass());
+    pm->addNestedPass<mlir::func::FuncOp>(
+        mlir::TF::CreateCanonicalizeCompileAndReplicateAttributesPass());
+    // Rewrite RecvTPUEmbeddingActivationsOp and SendTPUEmbeddingGradients ops
+    // to internal variants by introducing XlaRecvTPUEmbeddingDeduplicationData
+    // op.
+    pm->addNestedPass<mlir::func::FuncOp>(
+        mlir::TF::CreateRewriteTPUEmbeddingOpsPass());
     // Create TPU Compile and TPU Execute ops for each TPU devices.
     pm->addPass(mlir::TFTPU::CreateTPURewritePass());
     // Convert unified compilation and replication attributes back to legacy
     // attributes for subsequent passes.
-    pm->addNestedPass<mlir::FuncOp>(
+    pm->addNestedPass<mlir::func::FuncOp>(
         mlir::TFTPU::CreateConvertToLegacyCompileAndReplicateAttributesPass());
 
     // Add placeholder device attributes to resource arguments of TPU

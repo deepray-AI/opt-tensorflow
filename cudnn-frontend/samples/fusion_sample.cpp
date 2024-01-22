@@ -72,8 +72,8 @@ get_execplan_from_heuristics_else_fall_back(cudnn_frontend::OperationGraph&& opG
             }, opGraph,::allowAll, filtered_configs, true);
         
         std::cout << "get_heuristics_list Statuses: ";
-        for (auto i = 0 ; i < statuses.size(); i++) {
-            std::cout << cudnn_frontend::to_string(statuses[i]) << " ";
+        for (auto status : statuses) {
+            std::cout << cudnn_frontend::to_string(status) << " ";
         }
         std::cout << std::endl;
         std::cout << "Filter config list has " << filtered_configs.size() << " configurations " << std::endl;
@@ -308,7 +308,7 @@ run_conv_scale_bias_add_leaky_relu(int64_t* x_dim,
 
         void* workspace_ptr = nullptr;
         if (workspace_size > 0) {
-            checkCudaErr(cudaMalloc(&workspace_ptr, workspace_size));
+            checkCudaErr(cudaMalloc(&workspace_ptr, (size_t)workspace_size));
         }
         void* data_ptrs[] = {devPtrX, devPtrY, devPtrW, devPtrS, devPtrB, devPtrA};
         int64_t uids[]    = {'x', 'y', 'w', 's', 'b', 'a'};
@@ -335,8 +335,14 @@ run_conv_scale_bias_add_leaky_relu(int64_t* x_dim,
         if (prop.major < 8 && e.getCudnnStatus() == CUDNN_STATUS_NOT_SUPPORTED) {
             std::cout << "Fusion with float inputs is only supported on Ampere or later" << std::endl;
         } else {
-            std::cout << "[ERROR] Exception " << e.what() << std::endl;
+#if (CUDNN_VERSION == 8600) || (CUDNN_VERSION == 8700)
+            if (prop.major == 9) {
+                std::cout << "Hopper GPUs does not have float fused operations support yet\n";
+                return;
+            }
+#endif
 #if (CUDNN_VERSION >= 8300)
+            std::cout << "[ERROR] Exception " << e.what() << std::endl;
             CHECK(false);
 #endif
         }
@@ -532,7 +538,7 @@ run_conv_bias_scale_relu(int64_t* x_dim,
 
         void* workspace_ptr = nullptr;
         if (workspace_size > 0) {
-            checkCudaErr(cudaMalloc(&workspace_ptr, workspace_size));
+            checkCudaErr(cudaMalloc(&workspace_ptr, (size_t)workspace_size));
         }
         void* data_ptrs[] = {devPtrX, devPtrY, devPtrW, devPtrB, devPtrS};
         int64_t uids[]    = {'x', 'y', 'w', 'b', 's'};
@@ -769,7 +775,7 @@ run_serialization_conv_bias_scale_relu(int64_t* x_dim,
 
         void* workspace_ptr = nullptr;
         if (workspace_size > 0) {
-            checkCudaErr(cudaMalloc(&workspace_ptr, workspace_size));
+            checkCudaErr(cudaMalloc(&workspace_ptr, (size_t)workspace_size));
         }
         void* data_ptrs[] = {devPtrX, devPtrY, devPtrW, devPtrB, devPtrS};
         int64_t uids[]    = {'x', 'y', 'w', 'b', 's'};
@@ -796,8 +802,8 @@ run_serialization_conv_bias_scale_relu(int64_t* x_dim,
             (e.getCudnnStatus() == CUDNN_STATUS_ARCH_MISMATCH || e.getCudnnStatus() == CUDNN_STATUS_NOT_SUPPORTED)) {
             std::cout << "Example is only supported for Ampere GPUs" << std::endl;
         } else {
-            std::cout << "[ERROR] Exception " << e.what() << std::endl;
 #if (CUDNN_VERSION >= 8400)
+            std::cout << "[ERROR] Exception " << e.what() << std::endl;
             CHECK(false);
 #endif
         }
@@ -805,7 +811,8 @@ run_serialization_conv_bias_scale_relu(int64_t* x_dim,
 }
 
 void
-run_conv_scale_bias_relu_gen_index_selection(int64_t* x_dim,
+run_conv_scale_bias_relu_gen_index_selection(
+                              int64_t* x_dim,
                               int64_t* w_dim,
                               int64_t* y_dim,
                               int64_t* s_dim,
@@ -825,11 +832,36 @@ run_conv_scale_bias_relu_gen_index_selection(int64_t* x_dim,
                               void* devPtrTopThreshold,
                               void* devPtrBottomThreshold) {
     cudnnHandle_t handle_;
+    (void)handle_;
+    (void)x_dim;
+    (void)w_dim;
+    (void)y_dim;
+    (void)s_dim;
+    (void)b_dim;
+    (void)threshold_dim;
+    (void)dataType;
+    (void)convDim;
+    (void)conv_padA;
+    (void)conv_dilationA;
+    (void)conv_strideA;
+    (void)axis;
+    (void)devPtrX;
+    (void)devPtrW;
+    (void)devPtrY;
+    (void)devPtrS;
+    (void)devPtrB;
+    (void)devPtrTopThreshold;
+    (void)devPtrBottomThreshold;
     try {
 #if (CUDNN_VERSION >= 8400)
         // Create cudnn handle
         checkCudnnErr(cudnnCreate(&handle_));
-
+        if (check_device_arch_newer_than("turing") == false) {
+            cudnn_frontend::set_error_and_throw_exception(
+                    nullptr,
+                    CUDNN_STATUS_ARCH_MISMATCH,
+                    "run_conv_scale_bias_relu_gen_index_selection: Sample requires Ampere or above GPU");
+        }
         // Creates the necessary tensor descriptors
         int64_t stride[4];
         generateStrides(x_dim, stride, 4, CUDNN_TENSOR_NHWC);
@@ -1152,7 +1184,7 @@ run_conv_scale_bias_relu_gen_index_selection(int64_t* x_dim,
 
         void* workspace_ptr = nullptr;
         if (workspace_size > 0) {
-            checkCudaErr(cudaMalloc(&workspace_ptr, workspace_size));
+            checkCudaErr(cudaMalloc(&workspace_ptr, (size_t)workspace_size));
         }
         void* data_ptrs[] = {devPtrX, devPtrY, devPtrW, devPtrS, devPtrB, devPtrTopThreshold, devPtrBottomThreshold};
         int64_t uids[]    = {'x', 'y', 'w', 's', 'b', 't', 'u'};
@@ -1173,6 +1205,7 @@ run_conv_scale_bias_relu_gen_index_selection(int64_t* x_dim,
 #endif
 
     } catch (cudnn_frontend::cudnnException& e) {
+        if (e.getCudnnStatus() == CUDNN_STATUS_ARCH_MISMATCH) {return;}
         std::cout << "[ERROR] Exception " << e.what() << std::endl;
         CHECK(false);
     }
@@ -1197,6 +1230,13 @@ run_conv_scale_bias_relu_int8(int64_t* x_dim,
     try {
         // Create cudnn handle
         checkCudnnErr(cudnnCreate(&handle_));
+
+        if (check_device_arch_newer_than("turing") == false) {
+            cudnn_frontend::set_error_and_throw_exception(
+                    nullptr,
+                    CUDNN_STATUS_ARCH_MISMATCH,
+                    "run_conv_scale_bias_relu_int8: Sample requires Turing or above GPU");
+        }
 
         // Creates the necessary tensor descriptors
         int64_t stride[4];
@@ -1368,7 +1408,7 @@ run_conv_scale_bias_relu_int8(int64_t* x_dim,
 
         void* workspace_ptr = nullptr;
         if (workspace_size > 0) {
-            checkCudaErr(cudaMalloc(&workspace_ptr, workspace_size));
+            checkCudaErr(cudaMalloc(&workspace_ptr, (size_t)workspace_size));
         }
         void* data_ptrs[] = {devPtrX, devPtrY, devPtrW, devPtrS, devPtrB};
         int64_t uids[]    = {'x', 'y', 'w', 's', 'b'};
@@ -1390,12 +1430,18 @@ run_conv_scale_bias_relu_int8(int64_t* x_dim,
     } catch (cudnn_frontend::cudnnException& e) {
         struct cudaDeviceProp prop;
         checkCudaErrors(cudaGetDeviceProperties( &prop, 0 ));
-        // this example is only for Ampere cards
+        // this example is only for Turing and later cards
         if (prop.major < 8 && (e.getCudnnStatus() == CUDNN_STATUS_ARCH_MISMATCH || e.getCudnnStatus() == CUDNN_STATUS_NOT_SUPPORTED)) {
-            std::cout << "Example is only supported for Ampere GPUs" << std::endl; 
+            std::cout << "Example is only supported for Turing GPUs" << std::endl; 
         }  else {
-            std::cout << "[ERROR] Exception " << e.what() << std::endl;
+#if (CUDNN_VERSION == 8600)
+            if (prop.major == 9) {
+                std::cout << "Hopper GPUs does not have int8 fused operations support yet\n";
+                return;
+            }
+#endif
 #if (CUDNN_VERSION >= 8300)
+            std::cout << "[ERROR] Exception " << e.what() << std::endl;
             CHECK(false);
 #endif
         }
@@ -1412,11 +1458,9 @@ run_pool_scale_bias_relu_int8(int64_t* x_dim,
                               void* devPtrS,
                               void* devPtrB, 
                               cudnnDataType_t compType,
-#if (CUDNN_VERSION >= 8500)
-                              cudnnResampleMode_t mode,
-                              cudnnNanPropagation_t nanOpt, 
-                              cudnnPaddingMode_t paddingMode,
-#endif       
+                              cudnnNanPropagation_t const nanOpt, 
+                              cudnn_frontend::cudnnResampleMode_t const mode,
+                              cudnn_frontend::cudnnPaddingMode_t const padding_mode,
                               int64_t nbSpatialDims,                         
                               double alpha,                           
                               double beta,
@@ -1425,6 +1469,13 @@ run_pool_scale_bias_relu_int8(int64_t* x_dim,
                               int64_t* postPaddingA,
                               int64_t* strideA ) {
     cudnnHandle_t handle_;
+    (void)nbSpatialDims;
+    (void)alpha;
+    (void)beta;
+    (void)windowDimA;
+    (void)prePaddingA;
+    (void)postPaddingA;
+    (void)strideA;
     try {
         // Create cudnn handle
         checkCudnnErr(cudnnCreate(&handle_));
@@ -1437,7 +1488,7 @@ run_pool_scale_bias_relu_int8(int64_t* x_dim,
                            .setStride(4, strideTensor)
                            .setId('x')
                            .setAlignment(16)  // 16B alignment is needed to run a tensor core engine
-                           .setDataType(CUDNN_DATA_FLOAT)
+                           .setDataType(CUDNN_DATA_INT8)
                            .build();
         generateStrides(s_dim, strideTensor, 4, CUDNN_TENSOR_NHWC);
         auto sTensor = cudnn_frontend::TensorBuilder()
@@ -1464,7 +1515,7 @@ run_pool_scale_bias_relu_int8(int64_t* x_dim,
                                    .setId('A')  // after conv
                                    .setAlignment(16)
                                    .setVirtual()
-                                   .setDataType(CUDNN_DATA_FLOAT)
+                                   .setDataType(compType)
                                    .build();
         auto afterScaleTensor = cudnn_frontend::TensorBuilder()
                                     .setDim(4, y_dim)
@@ -1472,7 +1523,7 @@ run_pool_scale_bias_relu_int8(int64_t* x_dim,
                                     .setId('B')  // after scale
                                     .setAlignment(16)
                                     .setVirtual()
-                                    .setDataType(CUDNN_DATA_FLOAT)
+                                    .setDataType(compType)
                                     .build();
         auto afterBiasTensor = cudnn_frontend::TensorBuilder()
                                    .setDim(4, y_dim)
@@ -1480,7 +1531,7 @@ run_pool_scale_bias_relu_int8(int64_t* x_dim,
                                    .setId('C')  // after bias
                                    .setAlignment(16)
                                    .setVirtual()
-                                   .setDataType(CUDNN_DATA_FLOAT)
+                                   .setDataType(compType)
                                    .build();
         auto yTensor = cudnn_frontend::TensorBuilder()
                            .setDim(4, y_dim)
@@ -1500,16 +1551,14 @@ run_pool_scale_bias_relu_int8(int64_t* x_dim,
 
          // Define the resample descriptor
         auto poolDesc = cudnn_frontend::ResampleDescBuilder_v8()
-                            .setComputeType(compType)
-#if (CUDNN_VERSION >= 8500)
+                            .setComputeType(CUDNN_DATA_FLOAT)
                             .setNanPropagation(nanOpt)
                             .setResampleMode(mode)
-                            .setPaddingMode(paddingMode)
+                            .setPaddingMode(padding_mode)
                             .setSpatialDim(nbSpatialDims, windowDimA)
                             .setSpatialStride(nbSpatialDims, strideA)
                             .setPrePadding(nbSpatialDims, prePaddingA)
                             .setPostPadding(nbSpatialDims, postPaddingA)
-#endif
                             .build(); 
         std::cout << "Initialized Pool Desc" << std::endl;
         std::cout << poolDesc.describe() << std::endl;
@@ -1517,7 +1566,7 @@ run_pool_scale_bias_relu_int8(int64_t* x_dim,
         // Define the scale descriptor
         auto scaleDesc = cudnn_frontend::PointWiseDescBuilder()
                              .setMode(CUDNN_POINTWISE_MUL)
-                             .setComputeType(CUDNN_DATA_FLOAT)
+                             .setComputeType(compType)
                              .build();
         std::cout << "Initialized Scale Desc"<< std::endl;
         std::cout << scaleDesc.describe() << std::endl;
@@ -1525,7 +1574,7 @@ run_pool_scale_bias_relu_int8(int64_t* x_dim,
         // Define the bias descriptor
         auto biasDesc = cudnn_frontend::PointWiseDescBuilder()
                             .setMode(CUDNN_POINTWISE_ADD)
-                            .setComputeType(CUDNN_DATA_FLOAT)
+                            .setComputeType(compType)
                             .build();
         std::cout << "Initialized Bias Desc"<< std::endl;
         std::cout << biasDesc.describe() << std::endl;
@@ -1533,7 +1582,7 @@ run_pool_scale_bias_relu_int8(int64_t* x_dim,
         // Define the activation descriptor
         auto actDesc = cudnn_frontend::PointWiseDescBuilder()
                            .setMode(CUDNN_POINTWISE_RELU_FWD)
-                           .setComputeType(CUDNN_DATA_FLOAT)
+                           .setComputeType(compType)
                            .build();
         std::cout << "Initialized Activation Desc"<< std::endl;
         std::cout << actDesc.describe() << std::endl;
@@ -1599,7 +1648,7 @@ run_pool_scale_bias_relu_int8(int64_t* x_dim,
 
         void* workspace_ptr = nullptr;
         if (workspace_size > 0) {
-            checkCudaErr(cudaMalloc(&workspace_ptr, workspace_size));
+            checkCudaErr(cudaMalloc(&workspace_ptr, (size_t)workspace_size));
         }
 
         // Create the variant pack and associate with the data pointers 
@@ -1624,14 +1673,13 @@ run_pool_scale_bias_relu_int8(int64_t* x_dim,
     } catch (cudnn_frontend::cudnnException& e) {
         struct cudaDeviceProp prop;
         checkCudaErrors(cudaGetDeviceProperties( &prop, 0 ));
-        
+        std::cout << "Sample not executed for cuDNN version " << CUDNN_VERSION << std::endl;
         // this example is only for Ampere cards
         if (prop.major < 8 && (e.getCudnnStatus() == CUDNN_STATUS_ARCH_MISMATCH || e.getCudnnStatus() == CUDNN_STATUS_NOT_SUPPORTED)) {
             std::cout << "Example is only supported for Ampere GPUs" << std::endl; 
         }  else {
-            std::cout << "[ERROR] Exception " << e.what() << std::endl;
-
 #if (CUDNN_VERSION >= 8500)
+            std::cout << "[ERROR] Exception " << e.what() << std::endl;
             CHECK(false);
 #endif
         }
@@ -1654,7 +1702,12 @@ run_matmul_bias_gelu(int64_t* a_dim,
     try {
         // Create cudnn handle
         checkCudnnErr(cudnnCreate(&handle_));
-
+        if (check_device_arch_newer_than("ampere") == false && dataType == CUDNN_DATA_FLOAT) {
+            cudnn_frontend::set_error_and_throw_exception(
+                    nullptr,
+                    CUDNN_STATUS_ARCH_MISMATCH,
+                    "run_matmul_bias_gelu: Sample requires Ampere or above GPU");
+        }
         // Creates the necessary tensor descriptors
         int64_t stride[3];
         // the intension is to compute stride for a [1, M, K] matrix with K in the inner most dimension, and
@@ -1781,7 +1834,7 @@ run_matmul_bias_gelu(int64_t* a_dim,
 
         void* workspace_ptr = nullptr;
         if (workspace_size > 0) {
-            checkCudaErr(cudaMalloc(&workspace_ptr, workspace_size));
+            checkCudaErr(cudaMalloc(&workspace_ptr, (size_t)workspace_size));
         }
         void* data_ptrs[] = {devPtrA, devPtrB, devPtrC, devPtrZ, devPtrAfterZ};
         int64_t uids[]    = {'a', 'b', 'c', 'z', 'B'};
@@ -1805,7 +1858,7 @@ run_matmul_bias_gelu(int64_t* a_dim,
         checkCudaErrors(cudaGetDeviceProperties(&prop, 0));
 
         // this example is only for Ampere cards
-        if (prop.major < 8 && e.getCudnnStatus() == CUDNN_STATUS_NOT_SUPPORTED) {
+        if (prop.major < 8 && (e.getCudnnStatus() == CUDNN_STATUS_NOT_SUPPORTED || e.getCudnnStatus() == CUDNN_STATUS_ARCH_MISMATCH)) {
             std::cout << "Fusion with float inputs is only supported on Ampere or later" << std::endl;
         } else {
             std::cout << "[ERROR] Exception " << e.what() << std::endl;
@@ -1833,7 +1886,12 @@ run_conv_drelu(int64_t* x_dim,
         int convDim = 2;
 
         checkCudnnErr(cudnnCreate(&handle_));
-
+        if (check_device_arch_newer_than("ampere") == false) {
+            cudnn_frontend::set_error_and_throw_exception(
+                    nullptr,
+                    CUDNN_STATUS_ARCH_MISMATCH,
+                    "run_conv_drelu: Sample requires Ampere or above GPU");
+        }
         int64_t x_id         = 101;
         int64_t w_id         = 102;
         int64_t bwd_act_x_id = 201;
@@ -1871,7 +1929,7 @@ run_conv_drelu(int64_t* x_dim,
                                      .setId(after_conv_id)
                                      .setAlignment(4)
                                      .setVirtual()
-                                     .setDataType(dataType)
+                                     .setDataType(CUDNN_DATA_FLOAT)
                                      .build();
 
         auto bwd_act_x_tensor = cudnn_frontend::TensorBuilder()
@@ -1947,7 +2005,7 @@ run_conv_drelu(int64_t* x_dim,
 
         void* workspace_ptr = nullptr;
         if (workspace_size > 0) {
-            checkCudaErr(cudaMalloc(&workspace_ptr, workspace_size));
+            checkCudaErr(cudaMalloc(&workspace_ptr, (size_t)workspace_size));
         }
         void* data_ptrs[] = {dev_ptr_x, dev_ptr_w, dev_ptr_bwd_act_x, dev_ptr_y};
         int64_t uids[]    = {x_id, w_id, bwd_act_x_id, y_id};
@@ -1969,7 +2027,9 @@ run_conv_drelu(int64_t* x_dim,
         cudnn_frontend::throw_if([status]() { return (status != CUDNN_STATUS_SUCCESS); }, "Plan execute error", status);
 
     } catch (cudnn_frontend::cudnnException& e) {
+        if (e.getCudnnStatus() == CUDNN_STATUS_ARCH_MISMATCH) {return;}
         std::cout << "[ERROR] Exception " << e.what() << std::endl;
+
         CHECK(false);
     }
 }
@@ -1989,7 +2049,12 @@ run_dgrad_drelu(int64_t* dx_dim,
     cudnnHandle_t handle_;
     try {
         int convDim = 2;
-
+        if (check_device_arch_newer_than("ampere") == false) {
+            cudnn_frontend::set_error_and_throw_exception(
+                    nullptr,
+                    CUDNN_STATUS_ARCH_MISMATCH,
+                    "run_dgrad_drelu: Sample requires Ampere or above GPU");
+        }
         checkCudnnErr(cudnnCreate(&handle_));
 
         int64_t dx_id        = 101;
@@ -2107,7 +2172,7 @@ run_dgrad_drelu(int64_t* dx_dim,
 
         void* workspace_ptr = nullptr;
         if (workspace_size > 0) {
-            checkCudaErr(cudaMalloc(&workspace_ptr, workspace_size));
+            checkCudaErr(cudaMalloc(&workspace_ptr, (size_t)workspace_size));
         }
         void* data_ptrs[] = {dev_ptr_dx, dev_ptr_w, dev_ptr_bwd_act_x, dev_ptr_dy};
         int64_t uids[]    = {dx_id, w_id, bwd_act_x_id, dy_id};
@@ -2129,6 +2194,7 @@ run_dgrad_drelu(int64_t* dx_dim,
         cudnn_frontend::throw_if([status]() { return (status != CUDNN_STATUS_SUCCESS); }, "Plan execute error", status);
 
     } catch (cudnn_frontend::cudnnException& e) {
+        if (e.getCudnnStatus() == CUDNN_STATUS_ARCH_MISMATCH) {return;}
         std::cout << "[ERROR] Exception " << e.what() << std::endl;
         CHECK(false);
     }
@@ -2151,7 +2217,12 @@ run_matmul_dgelu_dbias(const int64_t* dy_dim,
     try {
         // Create cudnn handle
         checkCudnnErr(cudnnCreate(&handle_));
-
+        if (check_device_arch_newer_than("ampere") == false) {
+            cudnn_frontend::set_error_and_throw_exception(
+                    nullptr,
+                    CUDNN_STATUS_ARCH_MISMATCH,
+                    "run_matmul_dgelu_dbias: Sample requires Ampere or above GPU");
+        }
         // Creates the necessary tensor descriptors
         int64_t stride[3];
 
@@ -2294,7 +2365,7 @@ run_matmul_dgelu_dbias(const int64_t* dy_dim,
 
         void* workspace_ptr = nullptr;
         if (workspace_size > 0) {
-            checkCudaErr(cudaMalloc(&workspace_ptr, workspace_size));
+            checkCudaErr(cudaMalloc(&workspace_ptr, (size_t)workspace_size));
         }
         void* data_ptrs[] = {dev_ptr_dy, dev_ptr_w, dev_ptr_dx, dev_ptr_bwd_act_x, dev_ptr_dbias};
         int64_t uids[]    = {dy_uid, w_uid, dx_uid, bwd_act_x_uid, dbias_uid};
@@ -2318,7 +2389,7 @@ run_matmul_dgelu_dbias(const int64_t* dy_dim,
         checkCudaErrors(cudaGetDeviceProperties(&prop, 0));
 
         // this example is only for Ampere cards
-        if (prop.major < 8 && e.getCudnnStatus() == CUDNN_STATUS_NOT_SUPPORTED) {
+        if (prop.major < 8 && (e.getCudnnStatus() == CUDNN_STATUS_NOT_SUPPORTED || e.getCudnnStatus() == CUDNN_STATUS_ARCH_MISMATCH)) {
             std::cout << "Fusion with float inputs is only supported on Ampere or later" << std::endl;
         } else {
             std::cout << "[ERROR] Exception " << e.what() << std::endl;
@@ -2343,7 +2414,12 @@ run_conv_reduction(int64_t* x_dim,
     try {
         // Create cudnn handle
         checkCudnnErr(cudnnCreate(&handle_));
-
+        if (check_device_arch_newer_than("ampere") == false) {
+            cudnn_frontend::set_error_and_throw_exception(
+                    nullptr,
+                    CUDNN_STATUS_ARCH_MISMATCH,
+                    "run_conv_reduction: Sample requires Ampere or above GPU");
+        }
         // Creates the necessary tensor descriptors
         int64_t stride[4];
         generateStrides(x_dim, stride, 4, CUDNN_TENSOR_NHWC);
@@ -2446,7 +2522,7 @@ run_conv_reduction(int64_t* x_dim,
 
         void* workspace_ptr = nullptr;
         if (workspace_size > 0) {
-            checkCudaErr(cudaMalloc(&workspace_ptr, workspace_size));
+            checkCudaErr(cudaMalloc(&workspace_ptr, (size_t)workspace_size));
         }
         void* data_ptrs[] = {devPtrX, devPtrW, devPtrR};
         int64_t uids[]    = {'x', 'w', 'r'};
@@ -2466,6 +2542,7 @@ run_conv_reduction(int64_t* x_dim,
         cudnn_frontend::throw_if([status]() { return (status != CUDNN_STATUS_SUCCESS); }, "Plan execute error", status);
 
     } catch (cudnn_frontend::cudnnException& e) {
+        if (e.getCudnnStatus() == CUDNN_STATUS_ARCH_MISMATCH) {return;}
         std::cout << "[ERROR] Exception " << e.what() << std::endl;
         CHECK(false);
     }
@@ -2683,14 +2760,14 @@ run_bn_conv_gen_stat(int64_t* xTensorDim,
             }, opGraph,::allowAll, filtered_configs, true);
         
         std::cout << "get_heuristics_list Statuses: ";
-        for (auto i = 0 ; i < statuses.size(); i++) {
+        for (size_t i = 0 ; i < statuses.size(); i++) {
             std::cout << cudnn_frontend::to_string(statuses[i]) << " ";
         }
         std::cout << std::endl;
         std::cout << "Filter config list has " << filtered_configs.size() << " configurations " << std::endl;
 
         cudnn_frontend::ManagedOpaqueDescriptor plan_desc = nullptr;
-        auto workspace_size = 0;
+        int64_t workspace_size = 0;
         cudnnStatus_t st = CUDNN_STATUS_SUCCESS;
         for (auto &config: filtered_configs) {
             try {
@@ -2713,7 +2790,7 @@ run_bn_conv_gen_stat(int64_t* xTensorDim,
 
         void* workspace_ptr = nullptr;
         if (workspace_size > 0) {
-            checkCudaErr(cudaMalloc(&workspace_ptr, workspace_size));
+            checkCudaErr(cudaMalloc(&workspace_ptr, (size_t)workspace_size));
         }
 
         void* data_ptrs[] = {XdevPtr, WdevPtr, YdevPtr, scaledevPtr, biasdevPtr, sumdevPtr, sqSumdevPtr};
@@ -2850,25 +2927,25 @@ run_bn_finalize(
             }, opGraph,::allowAll, filtered_configs, true);
         
         std::cout << "get_heuristics_list Statuses: ";
-        for (auto i = 0 ; i < statuses.size(); i++) {
+        for (size_t i = 0 ; i < statuses.size(); i++) {
             std::cout << cudnn_frontend::to_string(statuses[i]) << " ";
         }
         std::cout << std::endl;
         std::cout << "Filter config list has " << filtered_configs.size() << " configurations " << std::endl;
 
         auto plan_builder = [&filtered_configs, &opGraph, &handle_]() {
-            for (auto i = 0; i < filtered_configs.size(); i++) {
+            for (size_t i = 0; i < filtered_configs.size(); i++) {
                 try {
                     auto plan = cudnn_frontend::ExecutionPlanBuilder().setHandle(handle_).setEngineConfig(filtered_configs[i], opGraph.getTag()).build();
 		            return plan;
-                } catch (cudnn_frontend::cudnnException &e) {
+                } catch (cudnn_frontend::cudnnException &) {
                     continue;
                 }
             }
             return cudnn_frontend::ExecutionPlanBuilder().setHandle(handle_).setEngineConfig(filtered_configs[0], opGraph.getTag()).build();
         };
 
-	    CHECK(filtered_configs.size() > 0);
+	    REQUIRE(filtered_configs.size() > 0);
         auto plan = plan_builder();
         std::cout << "Plan tag: " << plan.getTag() << std::endl;
 
@@ -2877,7 +2954,7 @@ run_bn_finalize(
 
         void* workspace_ptr = nullptr;
         if (workspace_size > 0) {
-            checkCudaErr(cudaMalloc(&workspace_ptr, workspace_size));
+            checkCudaErr(cudaMalloc(&workspace_ptr, (size_t)workspace_size));
         }
 
         void* data_ptrs[15] = {YSumdevPtr, YSqSumdevPtr, scaledevPtr, biasdevPtr, 
@@ -2904,7 +2981,7 @@ run_bn_finalize(
     } catch (cudnn_frontend::cudnnException &e) {
         struct cudaDeviceProp prop;
         checkCudaErrors(cudaGetDeviceProperties(&prop, 0));
-#if (CUDNN_VERSION >= 8303)
+#if (CUDNN_VERSION >= 8400)
             std::cout << "[ERROR] Exception " << e.what() << std::endl;
             CHECK(false);
 #endif   
@@ -2913,14 +2990,14 @@ run_bn_finalize(
 
 cudnnStatus_t run_dsbar(int64_t *Y_dim,
                int64_t *scaleTensorDim,
-               int64_t *biasTensorDim,
                void *RP_YdevPtr,
                void *RP_scaleDevPtr,
                void *RP_biasDevPtr,
                void *DP_YdevPtr,
                void *DP_scaleDevPtr,
                void *DP_biasDevPtr,
-               void *YdevPtr)
+               void *YdevPtr,
+               cudnnDataType_t op_data_type)
 {
     cudnnHandle_t handle_;
 
@@ -3054,7 +3131,7 @@ cudnnStatus_t run_dsbar(int64_t *Y_dim,
                             .setStride(4, stride)
                             .setId('f')
                             .setAlignment(16) //16 byte alignment
-                            .setDataType(CUDNN_DATA_FLOAT)
+                            .setDataType(op_data_type)
                             .build();
 
         std::cout << RP_yTensor.describe() << std::endl;
@@ -3148,7 +3225,7 @@ cudnnStatus_t run_dsbar(int64_t *Y_dim,
         auto statuses = cudnn_frontend::get_heuristics_list<2>({"heuristics_instant", "heuristics_fallback"}, opGraph,::allowAll, filtered_configs, true);
 
         std::cout << "get_heuristics_list Statuses: ";
-        for (auto i = 0 ; i < statuses.size(); i++) {
+        for (size_t i = 0 ; i < statuses.size(); i++) {
             std::cout << cudnn_frontend::to_string(statuses[i]) << " ";
         }
         std::cout << std::endl;
@@ -3164,7 +3241,7 @@ cudnnStatus_t run_dsbar(int64_t *Y_dim,
 
         void* workspace_ptr = nullptr;
         if (workspace_size > 0) {
-            checkCudaErr(cudaMalloc(&workspace_ptr, workspace_size));
+            checkCudaErr(cudaMalloc(&workspace_ptr, (size_t)workspace_size));
         }
 
         void* data_ptrs[] = {RP_YdevPtr, DP_YdevPtr, RP_scaleDevPtr, DP_scaleDevPtr, RP_biasDevPtr, DP_biasDevPtr, YdevPtr};
@@ -3186,16 +3263,20 @@ cudnnStatus_t run_dsbar(int64_t *Y_dim,
         
     } catch (cudnn_frontend::cudnnException &e) {
         struct cudaDeviceProp prop;
-        checkCudaErrors(cudaGetDeviceProperties(&prop, 0));
+        checkCudaErrors(cudaGetDeviceProperties(&prop, 0));        
+        if (prop.major < 8 && (e.getCudnnStatus() == CUDNN_STATUS_NOT_SUPPORTED || e.getCudnnStatus() == CUDNN_STATUS_ARCH_MISMATCH)) {
+            std::cout << "Fusion with float inputs is only supported on Ampere or later" << std::endl;
+            return e.getCudnnStatus();
+        }
 #if (CUDNN_VERSION >= 8300)
-            std::cout << "[ERROR] Exception " << e.what() << std::endl;
-            CHECK(false);
+        std::cout << "[ERROR] Exception " << e.what() << std::endl;
+        CHECK(false);
 #endif
-        return CUDNN_STATUS_SUCCESS;
+        return e.getCudnnStatus();
     }
 }
 
-void
+cudnnStatus_t
 run_conv_two_global_scales(int64_t* xTensorDim,
                    int64_t* wTensorDim,
                    int64_t* yTensorDim,
@@ -3215,7 +3296,12 @@ run_conv_two_global_scales(int64_t* xTensorDim,
     try {
         // Create cudnn handle
         checkCudnnErr(cudnnCreate(&handle_));
-
+        if (check_device_arch_newer_than("ampere") == false) {
+            cudnn_frontend::set_error_and_throw_exception(
+                    nullptr,
+                    CUDNN_STATUS_ARCH_MISMATCH,
+                    "run_conv_two_global_scales: Sample requires Ampere or above GPU");
+        }
         // Creates the necessary tensor descriptors
         int64_t stride[4];
         generateStrides(xTensorDim, stride, 4, CUDNN_TENSOR_NHWC);
@@ -3336,14 +3422,14 @@ run_conv_two_global_scales(int64_t* xTensorDim,
             }, opGraph,::allowAll, filtered_configs, true);
         
         std::cout << "get_heuristics_list Statuses: ";
-        for (auto i = 0 ; i < statuses.size(); i++) {
+        for (size_t i = 0 ; i < statuses.size(); i++) {
             std::cout << cudnn_frontend::to_string(statuses[i]) << " ";
         }
         std::cout << std::endl;
         std::cout << "Filter config list has " << filtered_configs.size() << " configurations " << std::endl;
 
         cudnn_frontend::ManagedOpaqueDescriptor plan_desc = nullptr;
-        auto workspace_size = 0;
+        int64_t workspace_size = 0;
         for (auto &config: filtered_configs) {
             try {
                 auto plan =
@@ -3353,17 +3439,20 @@ run_conv_two_global_scales(int64_t* xTensorDim,
                 workspace_size = plan.getWorkspaceSize();
                 std::cout << plan.describe() << " requires workspace " << workspace_size << std::endl;
                 plan_desc = plan.get_desc();
-            } catch (cudnn_frontend::cudnnException& e)  {
+            } catch (cudnn_frontend::cudnnException&)  {
                 continue;
             }
         }
         if (plan_desc == nullptr ) {
-            std::cout << "No plan found implementing the operation graph" << std::endl;
+            cudnn_frontend::set_error_and_throw_exception(
+                nullptr,
+                CUDNN_STATUS_NOT_SUPPORTED,
+                "run_conv_two_global_scales: No plan found to be implementing this operation graph");
         }
 
         void* workspace_ptr = nullptr;
         if (workspace_size > 0) {
-            checkCudaErr(cudaMalloc(&workspace_ptr, workspace_size));
+            checkCudaErr(cudaMalloc(&workspace_ptr, (size_t)workspace_size));
         }
 
         void* data_ptrs[] = {devPtrX, devPtrW, devPtrScale1, devPtrScale2, devPtrOutput, afterConv};
@@ -3380,19 +3469,665 @@ run_conv_two_global_scales(int64_t* xTensorDim,
             checkCudaErr(cudaFree(workspace_ptr));
         }
         cudnn_frontend::throw_if([status]() { return (status != CUDNN_STATUS_SUCCESS); }, "Plan execute error", status);
-
+        return status;
     } catch (cudnn_frontend::cudnnException& e) {
         struct cudaDeviceProp prop;
         checkCudaErrors(cudaGetDeviceProperties(&prop, 0));
 
         // this example is only for Ampere cards
-        if (prop.major < 8 && e.getCudnnStatus() == CUDNN_STATUS_NOT_SUPPORTED) {
+        if (prop.major < 8 && (e.getCudnnStatus() == CUDNN_STATUS_NOT_SUPPORTED || e.getCudnnStatus() == CUDNN_STATUS_ARCH_MISMATCH)) {
             std::cout << "Fusion with float inputs is only supported on Ampere or later" << std::endl;
+            return e.getCudnnStatus();
         } else {
             std::cout << "[ERROR] Exception " << e.what() << std::endl;
 #if (CUDNN_VERSION >= 8300)
             CHECK(false);
 #endif
+            return e.getCudnnStatus();
         }
     }
 }
+   
+#if (CUDNN_VERSION >= 8600)
+void
+run_maxpool_with_idx(int64_t* x_dim,
+                    int64_t* y_dim,
+                    int64_t* idx_dim,
+                    void* devPtrdX,
+                    void* devPtrdY,
+                    void* devPtrIdx,
+                    cudnnDataType_t tensorType,
+                    cudnnNanPropagation_t const nanOpt, 
+                    cudnn_frontend::cudnnResampleMode_t mode,
+                    cudnn_frontend::cudnnPaddingMode_t const padding_mode,
+                    int32_t nbSpatialDims,                         
+                    int64_t* windowDimA,
+                    int64_t* prePaddingA,
+                    int64_t* postPaddingA,
+                    int64_t* strideA) {
+
+    cudnnHandle_t handle_;
+    try {
+        // Create cudnn handle
+        checkCudnnErr(cudnnCreate(&handle_));
+
+        // Creates the necessary tensor descriptors
+        int64_t strideTensor[4];
+        generateStrides(x_dim, strideTensor, 4, CUDNN_TENSOR_NHWC);
+        auto xTensor = cudnn_frontend::TensorBuilder()
+                           .setDim(4, x_dim)
+                           .setStrides(4, strideTensor)
+                           .setId('x')
+                           .setAlignment(16)  // 16B alignment is needed to run a tensor core engine
+                           .setDataType(tensorType)
+                           .build();
+
+
+        generateStrides(y_dim, strideTensor, 4, CUDNN_TENSOR_NHWC);
+        auto yTensor = cudnn_frontend::TensorBuilder()
+                                   .setDim(4, y_dim)
+                                   .setStrides(4, strideTensor)
+                                   .setId('y')  // after conv
+                                   .setAlignment(16)
+                                   .setDataType(tensorType)
+                                   .build();
+
+        generateStrides(idx_dim, strideTensor, 4, CUDNN_TENSOR_NHWC);
+        auto idxTensor = cudnn_frontend::TensorBuilder()
+                                   .setDim(4, idx_dim)
+                                   .setStrides(4, strideTensor)
+                                   .setId('i') 
+                                   .setAlignment(16)
+                                   .setDataType(CUDNN_DATA_INT8)
+                                   .build();
+
+        std::cout << xTensor.describe() << std::endl;
+        std::cout << yTensor.describe() << std::endl;
+        std::cout << idxTensor.describe() << std::endl;
+
+         // Define the resample descriptor
+        auto poolDesc = cudnn_frontend::ResampleDescBuilder_v8()
+                            .setComputeType(CUDNN_DATA_FLOAT)
+                            .setNanPropagation(nanOpt)
+                            .setResampleMode(mode)
+                            .setPaddingMode(padding_mode)
+                            .setSpatialDim(nbSpatialDims, windowDimA)
+                            .setSpatialStride(nbSpatialDims, strideA)
+                            .setPrePadding(nbSpatialDims, prePaddingA)
+                            .setPostPadding(nbSpatialDims, postPaddingA)
+                            .build(); 
+        std::cout << "Initialized Pool Desc" << std::endl;
+        std::cout << poolDesc.describe() << std::endl;
+
+         // Create a maxpooling Resample Node with index tensor
+        auto pool_op = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_RESAMPLE_FWD_DESCRIPTOR)
+                           .setxDesc(xTensor)
+                           .setyDesc(yTensor)
+                           .setidxDesc(idxTensor)
+                           .setResampleDesc(poolDesc)
+                           .build();
+        std::cout << pool_op.describe() << std::endl;
+
+        // Create an Operation Graph. In this case it is convolution bias scale activation
+        std::array<cudnn_frontend::Operation const*, 1> ops = {&pool_op};
+        auto opGraph = cudnn_frontend::OperationGraphBuilder()
+                           .setHandle(handle_)
+                           .setOperationGraph(ops.size(), ops.data())
+                           .build();
+
+        // Create engine configuration
+        cudnn_frontend::EngineConfigList filtered_configs;
+        auto statuses = cudnn_frontend::get_heuristics_list<2>({"heuristics_instant", "heuristics_fallback"}, opGraph,::allowAll, filtered_configs, true);
+
+        std::cout << "get_heuristics_list Statuses: ";
+        for (size_t i = 0 ; i < statuses.size(); i++) {
+            std::cout << cudnn_frontend::to_string(statuses[i]) << " ";
+        }
+        std::cout << std::endl;
+        std::cout << "Filter config list has " << filtered_configs.size() << " configurations " << std::endl;
+    
+        auto plan =
+            cudnn_frontend::ExecutionPlanBuilder().setHandle(handle_).setEngineConfig(filtered_configs[0], opGraph.getTag()).build();
+
+        std::cout << "Plan tag: " << plan.getTag() << std::endl;
+
+        auto workspace_size = plan.getWorkspaceSize();
+        std::cout << plan.describe() << " requires workspace " << workspace_size << std::endl;
+
+        void* workspace_ptr = nullptr;
+        if (workspace_size > 0) {
+            checkCudaErr(cudaMalloc(&workspace_ptr, (size_t)workspace_size));
+        }
+
+        // Create the variant pack and associate with the data pointers 
+        void* data_ptrs[] = {devPtrdX, devPtrdY, devPtrIdx};
+        int64_t uids[]    = {'x', 'y', 'i'};
+        auto variantPack  = cudnn_frontend::VariantPackBuilder()
+                               .setWorkspacePointer(workspace_ptr)
+                               .setDataPointers(3, data_ptrs)
+                               .setUids(3, uids)
+                               .build();
+        std::cout << "variantPack " << variantPack.describe() << std::endl;
+
+        // Trigger the execute operation 
+        cudnnStatus_t status = cudnnBackendExecute(handle_, plan.get_raw_desc(), variantPack.get_raw_desc());
+        if (workspace_size > 0) {
+            checkCudaErr(cudaFree(workspace_ptr));
+        }
+        checkCudnnErr(cudnnDestroy(handle_));
+        cudnn_frontend::throw_if([status]() { return (status != CUDNN_STATUS_SUCCESS); }, "Plan execute error", status);
+        std::cout << "EXECUTE SUCCESS" << std::endl;
+
+    } catch (cudnn_frontend::cudnnException& e) {
+        struct cudaDeviceProp prop;
+        checkCudaErrors(cudaGetDeviceProperties( &prop, 0 ));
+        
+        // this example is only for Ampere cards
+        if (prop.major < 8 && (e.getCudnnStatus() == CUDNN_STATUS_ARCH_MISMATCH || e.getCudnnStatus() == CUDNN_STATUS_NOT_SUPPORTED)) {
+            std::cout << "Example is only supported for Ampere GPUs" << std::endl; 
+        }  else {
+            std::cout << "[ERROR] Exception " << e.what() << std::endl;
+            CHECK(false);
+        }
+    }
+}
+#endif
+
+#if (CUDNN_VERSION >= 8600)
+void
+run_backward_avgpool(int64_t* dx_dim,
+                    int64_t* dy_dim,
+                    void* devPtrdX,
+                    void* devPtrdY,
+                    cudnnDataType_t tensorType,
+                    cudnnNanPropagation_t const nanOpt,
+                    cudnn_frontend::cudnnResampleMode_t mode,
+                    cudnn_frontend::cudnnPaddingMode_t const padding_mode,
+                    int32_t nbSpatialDims,                         
+                    int64_t* windowDimA,
+                    int64_t* prePaddingA,
+                    int64_t* postPaddingA,
+                    int64_t* strideA ) {
+    cudnnHandle_t handle_;
+    try {
+        // Create cudnn handle
+        checkCudnnErr(cudnnCreate(&handle_));
+
+        // Creates the necessary tensor descriptors
+        int64_t strideTensor[4];
+        generateStrides(dy_dim, strideTensor, 4, CUDNN_TENSOR_NHWC);
+        auto dyTensor = cudnn_frontend::TensorBuilder()
+                           .setDim(4, dy_dim)
+                           .setStrides(4, strideTensor)
+                           .setId('y')
+                           .setAlignment(16)  // 16B alignment is needed to run a tensor core engine
+                           .setDataType(tensorType)
+                           .build();
+
+
+        generateStrides(dx_dim, strideTensor, 4, CUDNN_TENSOR_NHWC);
+        auto dxTensor = cudnn_frontend::TensorBuilder()
+                                   .setDim(4, dx_dim)
+                                   .setStrides(4, strideTensor)
+                                   .setId('x')  // after conv
+                                   .setAlignment(16)
+                                   .setDataType(tensorType)
+                                   .build();
+
+        std::cout << dyTensor.describe() << std::endl;
+        std::cout << dxTensor.describe() << std::endl;
+
+         // Define the resample descriptor
+        auto poolDesc = cudnn_frontend::ResampleDescBuilder_v8()
+                            .setComputeType(CUDNN_DATA_FLOAT)
+                            .setNanPropagation(nanOpt)
+                            .setResampleMode(mode)
+                            .setPaddingMode(padding_mode)
+                            .setSpatialDim(nbSpatialDims, windowDimA)
+                            .setSpatialStride(nbSpatialDims, strideA)
+                            .setPrePadding(nbSpatialDims, prePaddingA)
+                            .setPostPadding(nbSpatialDims, postPaddingA)
+                            .build(); 
+        std::cout << "Initialized Pool Desc" << std::endl;
+        std::cout << poolDesc.describe() << std::endl;
+
+         // Create an average pooling Resample Node
+        auto pool_op = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_RESAMPLE_BWD_DESCRIPTOR)
+                           .setdxDesc(dxTensor)
+                           .setdyDesc(dyTensor)
+                           .setResampleDesc(poolDesc)
+                           .build();
+        std::cout << pool_op.describe() << std::endl;
+
+        // Create an Operation Graph. In this case it is convolution bias scale activation
+        std::array<cudnn_frontend::Operation const*, 1> ops = {&pool_op};
+        auto opGraph = cudnn_frontend::OperationGraphBuilder()
+                           .setHandle(handle_)
+                           .setOperationGraph(ops.size(), ops.data())
+                           .build();
+
+        // Create engine configuration
+        cudnn_frontend::EngineConfigList filtered_configs;
+        auto statuses = cudnn_frontend::get_heuristics_list<2>({"heuristics_instant", "heuristics_fallback"}, opGraph,::allowAll, filtered_configs, true);
+
+        std::cout << "get_heuristics_list Statuses: ";
+        for (size_t i = 0 ; i < statuses.size(); i++) {
+            std::cout << cudnn_frontend::to_string(statuses[i]) << " ";
+        }
+        std::cout << std::endl;
+        std::cout << "Filter config list has " << filtered_configs.size() << " configurations " << std::endl;
+    
+        auto plan =
+            cudnn_frontend::ExecutionPlanBuilder().setHandle(handle_).setEngineConfig(filtered_configs[0], opGraph.getTag()).build();
+
+        std::cout << "Plan tag: " << plan.getTag() << std::endl;
+
+        auto workspace_size = plan.getWorkspaceSize();
+        std::cout << plan.describe() << " requires workspace " << workspace_size << std::endl;
+
+        void* workspace_ptr = nullptr;
+        if (workspace_size > 0) {
+            checkCudaErr(cudaMalloc(&workspace_ptr, (size_t)workspace_size));
+        }
+
+        // Create the variant pack and associate with the data pointers 
+        void* data_ptrs[] = {devPtrdX, devPtrdY};
+        int64_t uids[]    = {'x', 'y'};
+        auto variantPack  = cudnn_frontend::VariantPackBuilder()
+                               .setWorkspacePointer(workspace_ptr)
+                               .setDataPointers(2, data_ptrs)
+                               .setUids(2, uids)
+                               .build();
+        std::cout << "variantPack " << variantPack.describe() << std::endl;
+
+        // Trigger the execute operation 
+        cudnnStatus_t status = cudnnBackendExecute(handle_, plan.get_raw_desc(), variantPack.get_raw_desc());
+        if (workspace_size > 0) {
+            checkCudaErr(cudaFree(workspace_ptr));
+        }
+        checkCudnnErr(cudnnDestroy(handle_));
+        cudnn_frontend::throw_if([status]() { return (status != CUDNN_STATUS_SUCCESS); }, "Plan execute error", status);
+        std::cout << "EXECUTE SUCCESS" << std::endl;
+
+    } catch (cudnn_frontend::cudnnException& e) {
+        struct cudaDeviceProp prop;
+        checkCudaErrors(cudaGetDeviceProperties( &prop, 0 ));
+        
+        // this example is only for Ampere cards
+        if (prop.major < 8 && (e.getCudnnStatus() == CUDNN_STATUS_ARCH_MISMATCH || e.getCudnnStatus() == CUDNN_STATUS_NOT_SUPPORTED)) {
+            std::cout << "Example is only supported for Ampere GPUs" << std::endl; 
+        }  else {
+            std::cout << "[ERROR] Exception " << e.what() << std::endl;
+            CHECK(false);
+        }
+    }
+}
+#endif
+
+#if (CUDNN_VERSION >= 8600)
+void
+run_backward_maxpool(int64_t* dx_dim,
+                    int64_t* dy_dim,
+                    int64_t* idx_dim,
+                    void* devPtrdX,
+                    void* devPtrdY,
+                    void* devPtrIdx,
+                    cudnnDataType_t tensorType,
+                    cudnnNanPropagation_t const nanOpt, 
+                    cudnn_frontend::cudnnResampleMode_t mode,
+                    cudnn_frontend::cudnnPaddingMode_t const padding_mode,
+                    int32_t nbSpatialDims,                         
+                    int64_t* windowDimA,
+                    int64_t* prePaddingA,
+                    int64_t* postPaddingA,
+                    int64_t* strideA ) {
+    cudnnHandle_t handle_;
+    try {
+        // Create cudnn handle
+        checkCudnnErr(cudnnCreate(&handle_));
+
+        // Creates the necessary tensor descriptors
+        int64_t strideTensor[4];
+        generateStrides(dy_dim, strideTensor, 4, CUDNN_TENSOR_NHWC);
+        auto dyTensor = cudnn_frontend::TensorBuilder()
+                           .setDim(4, dy_dim)
+                           .setStrides(4, strideTensor)
+                           .setId('y')
+                           .setAlignment(16)  // 16B alignment is needed to run a tensor core engine
+                           .setDataType(tensorType)
+                           .build();
+
+
+        generateStrides(dx_dim, strideTensor, 4, CUDNN_TENSOR_NHWC);
+        auto dxTensor = cudnn_frontend::TensorBuilder()
+                                   .setDim(4, dx_dim)
+                                   .setStrides(4, strideTensor)
+                                   .setId('x')  // after conv
+                                   .setAlignment(16)
+                                   .setDataType(tensorType)
+                                   .build();
+
+        generateStrides(idx_dim, strideTensor, 4, CUDNN_TENSOR_NHWC);
+        auto idxTensor = cudnn_frontend::TensorBuilder()
+                                   .setDim(4, idx_dim)
+                                   .setStrides(4, strideTensor)
+                                   .setId('i') 
+                                   .setAlignment(16)
+                                   .setDataType(CUDNN_DATA_INT8)
+                                   .build();
+
+        std::cout << dyTensor.describe() << std::endl;
+        std::cout << dxTensor.describe() << std::endl;
+
+        // Define the resample descriptor
+        auto poolDesc = cudnn_frontend::ResampleDescBuilder_v8()
+                            .setComputeType(CUDNN_DATA_FLOAT)
+                            .setSpatialDim(nbSpatialDims, windowDimA)
+                            .setNanPropagation(nanOpt)
+                            .setResampleMode(mode)
+                            .setPaddingMode(padding_mode)
+                            .setSpatialDim(nbSpatialDims, windowDimA)
+                            .setSpatialStride(nbSpatialDims, strideA)
+                            .setPrePadding(nbSpatialDims, prePaddingA)
+                            .setPostPadding(nbSpatialDims, postPaddingA)
+                            .build(); 
+        std::cout << "Initialized Pool Desc" << std::endl;
+        std::cout << poolDesc.describe() << std::endl;
+
+         // Create a maxpooling Resample Node with index tensor
+        auto pool_op = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_RESAMPLE_BWD_DESCRIPTOR)
+                           .setdxDesc(dxTensor)
+                           .setdyDesc(dyTensor)
+                           .setidxDesc(idxTensor)
+                           .setResampleDesc(poolDesc)
+                           .build();
+        std::cout << pool_op.describe() << std::endl;
+
+        // Create an Operation Graph. In this case it is convolution bias scale activation
+        std::array<cudnn_frontend::Operation const*, 1> ops = {&pool_op};
+        auto opGraph = cudnn_frontend::OperationGraphBuilder()
+                           .setHandle(handle_)
+                           .setOperationGraph(ops.size(), ops.data())
+                           .build();
+
+        // Create engine configuration
+        cudnn_frontend::EngineConfigList filtered_configs;
+        auto statuses = cudnn_frontend::get_heuristics_list<2>({"heuristics_instant", "heuristics_fallback"}, opGraph,::allowAll, filtered_configs, true);
+
+        std::cout << "get_heuristics_list Statuses: ";
+        for (size_t i = 0 ; i < statuses.size(); i++) {
+            std::cout << cudnn_frontend::to_string(statuses[i]) << " ";
+        }
+        std::cout << std::endl;
+        std::cout << "Filter config list has " << filtered_configs.size() << " configurations " << std::endl;
+    
+        auto plan =
+            cudnn_frontend::ExecutionPlanBuilder().setHandle(handle_).setEngineConfig(filtered_configs[0], opGraph.getTag()).build();
+
+        std::cout << "Plan tag: " << plan.getTag() << std::endl;
+
+        auto workspace_size = plan.getWorkspaceSize();
+        std::cout << plan.describe() << " requires workspace " << workspace_size << std::endl;
+
+        void* workspace_ptr = nullptr;
+        if (workspace_size > 0) {
+            checkCudaErr(cudaMalloc(&workspace_ptr, (size_t)workspace_size));
+        }
+
+        // Create the variant pack and associate with the data pointers 
+        void* data_ptrs[] = {devPtrdX, devPtrdY, devPtrIdx};
+        int64_t uids[]    = {'x', 'y', 'i'};
+        auto variantPack  = cudnn_frontend::VariantPackBuilder()
+                               .setWorkspacePointer(workspace_ptr)
+                               .setDataPointers(3, data_ptrs)
+                               .setUids(3, uids)
+                               .build();
+        std::cout << "variantPack " << variantPack.describe() << std::endl;
+
+        // Trigger the execute operation 
+        cudnnStatus_t status = cudnnBackendExecute(handle_, plan.get_raw_desc(), variantPack.get_raw_desc());
+        if (workspace_size > 0) {
+            checkCudaErr(cudaFree(workspace_ptr));
+        }
+        checkCudnnErr(cudnnDestroy(handle_));
+        cudnn_frontend::throw_if([status]() { return (status != CUDNN_STATUS_SUCCESS); }, "Plan execute error", status);
+        std::cout << "EXECUTE SUCCESS" << std::endl;
+
+    } catch (cudnn_frontend::cudnnException& e) {
+        struct cudaDeviceProp prop;
+        checkCudaErrors(cudaGetDeviceProperties( &prop, 0 ));
+        
+        // this example is only for Ampere cards
+        if (prop.major != 8 && (e.getCudnnStatus() == CUDNN_STATUS_ARCH_MISMATCH || e.getCudnnStatus() == CUDNN_STATUS_NOT_SUPPORTED)) {
+            std::cout << "Example is only supported for Ampere GPUs" << std::endl; 
+        }  else {
+            std::cout << "[ERROR] Exception " << e.what() << std::endl;
+            CHECK(false);
+        }
+    }
+}
+#endif
+
+#if (CUDNN_VERSION >= 8400)
+void
+run_bn_bwd_weight(
+    int64_t * xDim,
+    int64_t * dyDim,
+    int64_t * wDim,
+    int64_t * scaleDim,
+    void *x_bn_fwd,
+    void *w_fwd,
+    void *dy,
+    void *dy_bn,
+    void *mean,
+    void *inv_var,
+    void *scale, 
+    void *bias, 
+    void *d_scale, 
+    void *d_bias,
+    void *eqscale_dy,
+    void *eqscale_x,
+    void *eqbias
+) {
+    cudnnHandle_t handle_;
+    try {
+        // Create cudnn handle
+        checkCudnnErr(cudnnCreate(&handle_));
+
+        if (check_device_arch_newer_than("ampere") == false) {
+            cudnn_frontend::set_error_and_throw_exception(
+                    nullptr,
+                    CUDNN_STATUS_ARCH_MISMATCH,
+                    "run_conv_scale_bias_relu_gen_index_selection: Sample requires Ampere or above GPU");
+        }
+
+        cudnnDataType_t computeType = CUDNN_DATA_FLOAT;
+
+        // Creates the necessary tensor descriptors
+        int64_t xstrideTensor[4];
+        int64_t dystrideTensor[4];
+        int64_t wstrideTensor[4];
+        generateStrides(xDim,  xstrideTensor,  4, CUDNN_TENSOR_NHWC);
+        generateStrides(dyDim, dystrideTensor, 4, CUDNN_TENSOR_NHWC);
+        generateStrides(wDim,  wstrideTensor,  4, CUDNN_TENSOR_NHWC);
+
+        int64_t perChannelStride[4];
+        generateStrides(scaleDim, perChannelStride,  4, CUDNN_TENSOR_NHWC);
+
+        auto tensor_create = [](
+                            int64_t *stride,
+                            int64_t *dim,
+                            cudnnDataType_t type,
+                            int64_t id,
+                            bool is_virtual) {
+            return cudnn_frontend::TensorBuilder()
+                   .setDim(4, dim)
+                   .setStride(4, stride)
+                   .setId(id)
+                   .setAlignment(16)
+                   .setDataType(type)
+                   .setVirtual(is_virtual)
+                   .build();
+        };
+
+        auto pointwise_create = [](cudnnPointwiseMode_t mode) {
+            return cudnn_frontend::PointWiseDescBuilder()
+                        .setMode(mode)
+                        .setComputeType(CUDNN_DATA_FLOAT)
+                        .build();
+        };
+
+        auto pointwise_op_create = [] (cudnn_frontend::Tensor &x,
+                                       cudnn_frontend::Tensor &s,
+                                       cudnn_frontend::Tensor &y,
+                                       cudnn_frontend::PointWiseDesc &pw) {
+            return cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR)
+                           .setxDesc(x)
+                           .setbDesc(s)
+                           .setyDesc(y)
+                           .setpwDesc(pw)
+                           .build();
+        };
+
+        auto x_tensor_bn_fwd = tensor_create(xstrideTensor,   xDim, CUDNN_DATA_HALF, 100, false);
+        auto w_tensor        = tensor_create(wstrideTensor,   wDim, CUDNN_DATA_HALF, 101, false);
+        auto dy_tensor       = tensor_create(dystrideTensor, dyDim, CUDNN_DATA_HALF, 102, false);
+        auto dy_bn_tensor    = tensor_create(xstrideTensor,   xDim, CUDNN_DATA_HALF, 103, false);
+
+
+        auto scaleTensor    = tensor_create(perChannelStride, scaleDim, computeType, 200, false);
+        auto biasTensor     = tensor_create(perChannelStride, scaleDim, computeType, 201, false);
+        auto meanTensor     = tensor_create(perChannelStride, scaleDim, computeType, 202, false);
+        auto invVarTensor   = tensor_create(perChannelStride, scaleDim, computeType, 203, false);
+
+        auto d_scaleTensor       = tensor_create(perChannelStride, scaleDim, computeType, 300, false);
+        auto d_biasTensor        = tensor_create(perChannelStride, scaleDim, computeType, 301, false);
+        auto eqscale_dyTensor    = tensor_create(perChannelStride, scaleDim, computeType, 302, false);
+        auto eqscale_xTensor     = tensor_create(perChannelStride, scaleDim, computeType, 303, false);
+        auto eqbiasTensor        = tensor_create(perChannelStride, scaleDim, computeType, 304, false);
+
+
+        auto after_scaleTensor    = tensor_create(xstrideTensor, xDim, computeType, 400, true);
+        auto after_biasTensor     = tensor_create(xstrideTensor, xDim, computeType, 401, true);
+        auto after_meanTensor     = tensor_create(xstrideTensor, xDim, computeType, 402, true);
+        auto after_invVarTensor   = tensor_create(xstrideTensor, xDim, computeType, 403, true);
+
+        auto after_dgrad_tensor   = tensor_create(xstrideTensor, xDim, CUDNN_DATA_HALF, 500, true);
+
+        // Define the pointwise descriptor
+        auto scaleDesc = pointwise_create(CUDNN_POINTWISE_MUL);
+        auto biasDesc  = pointwise_create(CUDNN_POINTWISE_ADD);
+        auto addDesc   = pointwise_create(CUDNN_POINTWISE_ADD);
+        auto mulDesc   = pointwise_create(CUDNN_POINTWISE_MUL);
+        auto bwdReluDesc  = pointwise_create(CUDNN_POINTWISE_RELU_BWD);
+
+        // Create Pointwise Operations
+        auto addOpDesc   = pointwise_op_create(x_tensor_bn_fwd, meanTensor, after_meanTensor, addDesc);
+        auto mulOpDesc   = pointwise_op_create(after_meanTensor, invVarTensor, after_invVarTensor, mulDesc);
+        auto scaleOpDesc = pointwise_op_create(after_invVarTensor, scaleTensor, after_scaleTensor, scaleDesc);
+        auto biasOpDesc  = pointwise_op_create(after_scaleTensor, biasTensor, after_biasTensor, biasDesc);
+        auto bwdReluOpDesc = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR)
+                            .setdyDesc(after_dgrad_tensor)
+                            .setxDesc(after_biasTensor)
+                            .setdxDesc(dy_bn_tensor)
+                            .setpwDesc(bwdReluDesc)
+                            .build();
+
+        // Create dgrad desc and operation
+        int64_t convDim      = 2;
+        int64_t padding[]    = {1, 1};
+        int64_t dilation[]   = {1, 1};
+        int64_t convstride[] = {1, 1};
+
+        auto convDesc = cudnn_frontend::ConvDescBuilder()
+                    .setComputeType(computeType)
+                    .setMathMode(CUDNN_CROSS_CORRELATION)
+                    .setSpatialDimCount(convDim)
+                    .setSpatialStride(convDim, convstride)
+                    .setPrePadding(convDim, padding)
+                    .setPostPadding(convDim, padding)
+                    .setDilation(convDim, dilation)
+                    .build();
+
+        auto conv_op = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DATA_DESCRIPTOR)
+                    .setdyDesc(dy_tensor)
+                    .setwDesc(w_tensor)
+                    .setdxDesc(after_dgrad_tensor)
+                    .setcDesc(convDesc)
+                    .setAlpha(1.0f)
+                    .setBeta(0.0f)
+                    .build();
+
+        auto bn_bwd_op = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_BN_BWD_WEIGHTS_DESCRIPTOR)
+                        .setComputeType(computeType)
+                        .setxDesc(x_tensor_bn_fwd)
+                        .setSavedMeanAndInvVar(meanTensor, invVarTensor)
+                        .setScale(scaleTensor)
+                        .setdyDesc(dy_bn_tensor)
+                        .setEqScalesAndBias(eqscale_dyTensor, eqscale_xTensor, eqbiasTensor)
+                        .setDScaleAndDBias(d_scaleTensor, d_biasTensor)
+                        .build();
+
+                // Create an Operation Graph. In this case it is convolution scale bias add activation
+        std::array<cudnn_frontend::Operation const*, 7> ops = {&conv_op, &addOpDesc, &mulOpDesc, &scaleOpDesc, &biasOpDesc, &bwdReluOpDesc, &bn_bwd_op};
+
+        auto opGraph = cudnn_frontend::OperationGraphBuilder()
+                           .setHandle(handle_)
+                           .setOperationGraph(ops.size(), ops.data())
+                           .build();
+
+        // Create engine configuration
+        cudnn_frontend::EngineConfigList filtered_configs;
+        auto statuses = cudnn_frontend::get_heuristics_list<2>({"heuristics_instant", "heuristics_fallback"}, opGraph,::allowAll, filtered_configs, true);
+
+        std::cout << "get_heuristics_list Statuses: ";
+        for (size_t i = 0 ; i < statuses.size(); i++) {
+            std::cout << cudnn_frontend::to_string(statuses[i]) << " ";
+        }
+        std::cout << std::endl;
+        std::cout << "Filter config list has " << filtered_configs.size() << " configurations " << std::endl;
+    
+        auto plan =
+            cudnn_frontend::ExecutionPlanBuilder().setHandle(handle_).setEngineConfig(filtered_configs[0], opGraph.getTag()).build();
+
+        std::cout << "Plan tag: " << plan.getTag() << std::endl;
+
+        auto workspace_size = plan.getWorkspaceSize();
+        std::cout << plan.describe() << " requires workspace " << workspace_size << std::endl;
+
+
+        void* workspace_ptr = nullptr;
+        if (workspace_size > 0) {
+            checkCudaErr(cudaMalloc(&workspace_ptr, (size_t)workspace_size));
+        }
+
+        void* data_ptrs[] = {x_bn_fwd, w_fwd, dy, dy_bn, scale, bias, mean, inv_var, d_scale, d_bias, eqscale_dy, eqscale_x, eqbias};
+        int64_t uids[]    = {100, 101, 102, 103, 200, 201, 202, 203, 300, 301, 302, 303, 304};
+        auto variantPack  = cudnn_frontend::VariantPackBuilder()
+                               .setWorkspacePointer(workspace_ptr)
+                               .setDataPointers(13, data_ptrs)
+                               .setUids(13, uids)
+                               .build();
+        std::cout << "variantPack " << variantPack.describe() << std::endl;
+        cudnnStatus_t status = cudnnBackendExecute(handle_, plan.get_raw_desc(), variantPack.get_raw_desc());
+        if (workspace_size > 0) {
+            checkCudaErr(cudaFree(workspace_ptr));
+        }
+
+        cudnn_frontend::throw_if([status]() { return (status != CUDNN_STATUS_SUCCESS); }, "Plan execute error", status);
+        checkCudnnErr(cudnnDestroy(handle_));
+
+    } catch (cudnn_frontend::cudnnException& e) {
+        struct cudaDeviceProp prop;
+        checkCudaErrors(cudaGetDeviceProperties( &prop, 0 ));
+        
+        // this example is only for Ampere cards
+        if (prop.major != 8 && (e.getCudnnStatus() == CUDNN_STATUS_ARCH_MISMATCH || e.getCudnnStatus() == CUDNN_STATUS_NOT_SUPPORTED)) {
+            std::cout << "Example is only supported for Ampere GPUs" << std::endl; 
+        }  else {
+            std::cout << "[ERROR] Exception " << e.what() << std::endl;
+            CHECK(false);
+        }
+    }
+}
+#endif

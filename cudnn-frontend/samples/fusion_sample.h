@@ -37,6 +37,8 @@
 #include "fp16_emu.h"
 #include "helpers.h"
 
+#include <cudnn_frontend.h>
+
 void
 run_conv_scale_bias_add_leaky_relu(int64_t* x_dim,
                                    int64_t* w_dim,
@@ -137,11 +139,9 @@ run_pool_scale_bias_relu_int8(int64_t* x_dim,
                               void* devPtrS,
                               void* devPtrB, 
                               cudnnDataType_t compType,
-#if (CUDNN_VERSION >= 8500) 
-                              cudnnResampleMode_t mode ,
-                              cudnnNanPropagation_t nanOpt, 
-                              cudnnPaddingMode_t paddingMode, 
-#endif
+                              cudnnNanPropagation_t const nanOpt, 
+                              cudnn_frontend::cudnnResampleMode_t const resample_mode,
+                              cudnn_frontend::cudnnPaddingMode_t const padding_mode, 
                               int64_t nbSpatialDims,                         
                               double alpha,                           
                               double beta,
@@ -258,16 +258,35 @@ run_bn_finalize(
 
 cudnnStatus_t run_dsbar(int64_t *Y_dim,
                int64_t *scaleTensorDim,
-               int64_t *biasTensorDim,
                void *RP_YdevPtr,
                void *RP_scaleDevPtr,
                void *RP_biasDevPtr,
                void *DP_YdevPtr,
                void *DP_scaleDevPtr,
                void *DP_biasDevPtr,
-               void *YdevPtr);
+               void *YdevPtr,
+               cudnnDataType_t op_data_type);
 
+#if (CUDNN_VERSION >= 8600)
 void
+run_maxpool_with_idx(int64_t* x_dim,
+                    int64_t* y_dim,
+                    int64_t* idx_dim,
+                    void* devPtrdX,
+                    void* devPtrdY,
+                    void* devPtrIdx,
+                    cudnnDataType_t tensorType,
+                    cudnnNanPropagation_t const nanOpt, 
+                    cudnn_frontend::cudnnResampleMode_t const resample_mode,
+                    cudnn_frontend::cudnnPaddingMode_t const padding_mode,
+                    int32_t nbSpatialDims,                         
+                    int64_t* windowDimA,
+                    int64_t* prePaddingA,
+                    int64_t* postPaddingA,
+                    int64_t* strideA);
+#endif
+
+cudnnStatus_t
 run_conv_two_global_scales(int64_t* xTensorDim,
                    int64_t* wTensorDim,
                    int64_t* yTensorDim,
@@ -283,3 +302,61 @@ run_conv_two_global_scales(int64_t* xTensorDim,
                    void* devPtrOutput,
                    void* afterConv);
 
+#if (CUDNN_VERSION >= 8600)
+void
+run_backward_avgpool(int64_t* dx_dim,
+                    int64_t* dy_dim,
+                    void* devPtrdX,
+                    void* devPtrdY,
+                    cudnnDataType_t tensorType,
+                    cudnnNanPropagation_t const nanOpt,
+                    cudnn_frontend::cudnnResampleMode_t const resample_mode,
+                    cudnn_frontend::cudnnPaddingMode_t const padding_mode,
+                    int32_t nbSpatialDims,                         
+                    int64_t* windowDimA,
+                    int64_t* prePaddingA,
+                    int64_t* postPaddingA,
+                    int64_t* strideA);
+#endif
+
+#if (CUDNN_VERSION >= 8400)
+void
+run_backward_maxpool(int64_t* dx_dim,
+                    int64_t* dy_dim,
+                    int64_t* idx_dim,
+                    void* devPtrdX,
+                    void* devPtrdY,
+                    void* devPtrIdx,
+                    cudnnDataType_t tensorType,
+                    cudnnNanPropagation_t const nanOpt,
+                    cudnn_frontend::cudnnResampleMode_t const resample_mode,
+                    cudnn_frontend::cudnnPaddingMode_t const padding_mode,
+                    int32_t nbSpatialDims,                         
+                    int64_t* windowDimA,
+                    int64_t* prePaddingA,
+                    int64_t* postPaddingA,
+                    int64_t* strideA);
+#endif
+
+#if (CUDNN_VERSION >= 8400)
+void
+run_bn_bwd_weight(
+    int64_t * xDim,
+    int64_t * dyDim,
+    int64_t * wDim,
+    int64_t * scaleDim,
+    void *x_bn_fwd,
+    void *w_fwd,
+    void *dy,
+    void *dy_bn,
+    void *mean,
+    void *inv_var,
+    void *scale,
+    void *bias,
+    void *d_scale,
+    void *d_bias,
+    void * A,
+    void * B,
+    void * c
+);
+#endif

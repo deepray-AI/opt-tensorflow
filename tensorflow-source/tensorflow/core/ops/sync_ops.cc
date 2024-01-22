@@ -1,4 +1,4 @@
-/* Copyright 2022 The TensorFlow Authors. All Rights Reserved.
+/* Copyright 2023 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 
@@ -17,6 +17,9 @@ limitations under the License.
 
 namespace tensorflow {
 
+// SyncDevice is stateful because it has a side effect: it synchronizes the GPU
+// steam. If it weren't stateful, optimization passes like dead code elimination
+// might incorrectly remove it.
 REGISTER_OP("SyncDevice")
     .SetIsStateful()
     .SetShapeFn(shape_inference::NoOutputs);

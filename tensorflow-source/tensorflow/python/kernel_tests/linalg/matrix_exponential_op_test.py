@@ -29,7 +29,6 @@ from tensorflow.python.ops import variables
 from tensorflow.python.ops.linalg import linalg_impl
 from tensorflow.python.platform import benchmark
 from tensorflow.python.platform import test
-from tensorflow.python.keras import testing_utils
 
 
 def np_expm(x):  # pylint: disable=invalid-name
@@ -44,7 +43,7 @@ def np_expm(x):  # pylint: disable=invalid-name
   return y
 
 
-@testing_utils.run_all_without_tensor_float_32("Gemm can call TF32")
+@test_util.run_all_without_tensor_float_32("Avoid TF32-based matmuls.")
 class ExponentialOpTest(test.TestCase):
 
   def _verifyExponential(self, x, np_type):

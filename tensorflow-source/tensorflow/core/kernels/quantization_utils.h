@@ -25,10 +25,10 @@ limitations under the License.
 // optimized. They should be implementable using fixed point representations
 // to avoid a dependency on floating-point hardware.
 
-#if defined(__ARM_NEON__) || defined(__ARM_NEON)
-#define QUANTIZATION_UTILS_USE_NEON
-#include <arm_neon.h>
-#endif
+//#if defined(__ARM_NEON__) || defined(__ARM_NEON)
+//#define QUANTIZATION_UTILS_USE_NEON
+//#include <arm_neon.h>
+//#endif
 
 #include <array>
 
@@ -666,7 +666,6 @@ inline void RequantizeManyInNewRange<quint8, qint32>(
 
 template <int shift>
 struct int64_right_shift_op {
-  EIGEN_EMPTY_STRUCT_CTOR(int64_right_shift_op)
   EIGEN_DEVICE_FUNC
   EIGEN_STRONG_INLINE const int64_t operator()(const int64_t a) const {
     return a >> shift;

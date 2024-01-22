@@ -17,7 +17,6 @@
 import numpy as np
 
 from tensorflow.python.compiler.tensorrt.test import tf_trt_integration_test_base as trt_test
-from tensorflow.python.compiler.tensorrt.test import test_utils as trt_test_utils
 from tensorflow.python.framework import constant_op
 from tensorflow.python.framework import dtypes
 from tensorflow.python.framework import test_util
@@ -26,7 +25,7 @@ from tensorflow.python.ops import nn
 from tensorflow.python.platform import test
 
 
-@trt_test_utils.disable_tf32_testing
+@test_util.run_all_without_tensor_float_32("Uses matmul")
 class MemoryAlignmentTest(trt_test.TfTrtIntegrationTestBase):
   """Testing conversion of BatchMatMul in TF-TRT conversion."""
 
@@ -65,6 +64,7 @@ class MemoryAlignmentTest(trt_test.TfTrtIntegrationTestBase):
   def ExpectedRelativeTolerance(self, run_params):
     """The relative tolerance to compare floating point results."""
     return 0.1
+
 
 if __name__ == "__main__":
   test.main()

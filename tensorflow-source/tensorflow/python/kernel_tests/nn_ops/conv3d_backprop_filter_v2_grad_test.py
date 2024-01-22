@@ -16,6 +16,7 @@
 
 import numpy as np
 
+from tensorflow.python.framework import config
 from tensorflow.python.framework import constant_op
 from tensorflow.python.framework import dtypes
 from tensorflow.python.framework import errors
@@ -28,6 +29,13 @@ from tensorflow.python.platform import test
 
 
 class Conv3DBackpropFilterV2GradTest(test.TestCase):
+
+  def tearDown(self):
+    config.enable_tensor_float_32_execution(self.tf32_keep_)
+
+  def setUp(self):
+    self.tf32_keep_ = config.tensor_float_32_execution_enabled()
+    config.enable_tensor_float_32_execution(False)
 
   @test_util.run_deprecated_v1
   def testGradient(self):

@@ -19,37 +19,11 @@ limitations under the License.
 #include <unordered_set>
 #include <vector>
 
+#include "tensorflow/compiler/mlir/lite/metrics/types_util.h"
 #include "tensorflow/lite/python/metrics/converter_error_data.pb.h"
 
 namespace mlir {
 namespace TFL {
-
-// The hash function for ConverterErrorData.
-struct ConverterErrorDataHash {
-  std::size_t operator()(
-      const tflite::metrics::ConverterErrorData& v) const noexcept {
-    std::size_t hash_result = std::hash<std::string>{}(v.error_message());
-    if (v.has_subcomponent()) {
-      hash_result ^= std::hash<std::string>{}(v.subcomponent()) << 1;
-    }
-    if (v.has_error_code()) {
-      hash_result ^= std::hash<int>{}(v.error_code()) << 2;
-    }
-    if (v.has_operator_() && v.operator_().has_name()) {
-      hash_result ^= std::hash<std::string>{}(v.operator_().name()) << 3;
-    }
-    return hash_result;
-  }
-};
-
-// The comparison function for ConverterErrorData.
-struct ConverterErrorDataComparison {
-  std::size_t operator()(
-      const tflite::metrics::ConverterErrorData& a,
-      const tflite::metrics::ConverterErrorData& b) const noexcept {
-    return ConverterErrorDataHash()(a) == ConverterErrorDataHash()(b);
-  }
-};
 
 // A singleton to store errors collected by the instrumentation.
 class ErrorCollector {

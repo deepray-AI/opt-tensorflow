@@ -86,6 +86,7 @@ supported by TensorFlow Lite runtime with the Select TensorFlow Ops feature.
 *   `raw_ops.CheckNumerics`
 *   `raw_ops.CheckNumericsV2`
 *   `raw_ops.Cholesky`
+*   `raw_ops.ClipByValue`
 *   `raw_ops.CombinedNonMaxSuppression`
 *   `raw_ops.Complex`
 *   `raw_ops.ComplexAbs`
@@ -589,6 +590,7 @@ supported by TensorFlow Lite runtime with the Select TensorFlow Ops feature.
 *   `raw_ops.StackV2`
 *   `raw_ops.StatelessMultinomial`
 *   `raw_ops.StatelessRandomGammaV2`
+*   `raw_ops.StatelessRandomGammaV3`
 *   `raw_ops.StatelessRandomGetAlg`
 *   `raw_ops.StatelessRandomGetKeyCounter`
 *   `raw_ops.StatelessRandomGetKeyCounterAlg`
@@ -715,11 +717,13 @@ supported by TensorFlow Lite runtime with the Select TensorFlow Ops feature.
 *   `raw_ops.UniqueWithCounts`
 *   `raw_ops.UniqueWithCountsV2`
 *   `raw_ops.Unpack`
+*   `raw_ops.UnsortedSegmentJoin`
 *   `raw_ops.UnsortedSegmentMax`
 *   `raw_ops.UnsortedSegmentMin`
 *   `raw_ops.UnsortedSegmentProd`
 *   `raw_ops.UnsortedSegmentSum`
 *   `raw_ops.UnwrapDatasetVariant`
+*   `raw_ops.UpperBound`
 *   `raw_ops.VarHandleOp`
 *   `raw_ops.Variable`
 *   `raw_ops.VariableShape`

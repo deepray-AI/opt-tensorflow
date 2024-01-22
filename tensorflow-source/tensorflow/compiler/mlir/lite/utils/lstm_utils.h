@@ -102,7 +102,7 @@ class ConvertLSTMCellSimpleToFusedLSTM {
   virtual void SetOutputLayerNormCoefficients();
 
   // specified state
-  FuncOp fused_func_op_;
+  func::FuncOp fused_func_op_;
   Value input_;
   Value weight_;
   Value bias_;
@@ -210,6 +210,9 @@ class ConvertLayerNormalizedLSTMCellSimpleToFusedLSTM
 
 LogicalResult ConvertKerasLSTMLayer(mlir::func::FuncOp func_op,
                                     OpBuilder* builder);
+
+LogicalResult ConvertKerasLSTMLayer(mlir::func::FuncOp func_op,
+                                    OpBuilder* builder, bool indy);
 
 }  // end namespace TFL
 }  // end namespace mlir

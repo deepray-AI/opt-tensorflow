@@ -24,32 +24,32 @@ namespace convert {
 
 const UnaryOperationMapType* UnaryOperationMap() {
   static auto* const m = new UnaryOperationMapType({
-      {"Exp", nvinfer1::UnaryOperation::kEXP},
-      {"Log", nvinfer1::UnaryOperation::kLOG},
-      {"Sqrt", nvinfer1::UnaryOperation::kSQRT},
-      {"Rsqrt", nvinfer1::UnaryOperation::kSQRT},
-      {"Reciprocal", nvinfer1::UnaryOperation::kRECIP},
-      {"Abs", nvinfer1::UnaryOperation::kABS},
-      {"Neg", nvinfer1::UnaryOperation::kNEG},
-      {"Sin", nvinfer1::UnaryOperation::kSIN},
-      {"Cos", nvinfer1::UnaryOperation::kCOS},
-      {"Tan", nvinfer1::UnaryOperation::kTAN},
-      {"Sinh", nvinfer1::UnaryOperation::kSINH},
-      {"Cosh", nvinfer1::UnaryOperation::kCOSH},
-      {"Asin", nvinfer1::UnaryOperation::kASIN},
-      {"Acos", nvinfer1::UnaryOperation::kACOS},
-      {"Atan", nvinfer1::UnaryOperation::kATAN},
-      {"Asinh", nvinfer1::UnaryOperation::kASINH},
-      {"Acosh", nvinfer1::UnaryOperation::kACOSH},
-      {"Atanh", nvinfer1::UnaryOperation::kATANH},
-      {"Ceil", nvinfer1::UnaryOperation::kCEIL},
-      {"Floor", nvinfer1::UnaryOperation::kFLOOR},
-      {"Erf", nvinfer1::UnaryOperation::kERF},
+    {"Exp", nvinfer1::UnaryOperation::kEXP},
+        {"Log", nvinfer1::UnaryOperation::kLOG},
+        {"Sqrt", nvinfer1::UnaryOperation::kSQRT},
+        {"Rsqrt", nvinfer1::UnaryOperation::kSQRT},
+        {"Reciprocal", nvinfer1::UnaryOperation::kRECIP},
+        {"Abs", nvinfer1::UnaryOperation::kABS},
+        {"Neg", nvinfer1::UnaryOperation::kNEG},
+        {"Sin", nvinfer1::UnaryOperation::kSIN},
+        {"Cos", nvinfer1::UnaryOperation::kCOS},
+        {"Tan", nvinfer1::UnaryOperation::kTAN},
+        {"Sinh", nvinfer1::UnaryOperation::kSINH},
+        {"Cosh", nvinfer1::UnaryOperation::kCOSH},
+        {"Asin", nvinfer1::UnaryOperation::kASIN},
+        {"Acos", nvinfer1::UnaryOperation::kACOS},
+        {"Atan", nvinfer1::UnaryOperation::kATAN},
+        {"Asinh", nvinfer1::UnaryOperation::kASINH},
+        {"Acosh", nvinfer1::UnaryOperation::kACOSH},
+        {"Atanh", nvinfer1::UnaryOperation::kATANH},
+        {"Ceil", nvinfer1::UnaryOperation::kCEIL},
+        {"Floor", nvinfer1::UnaryOperation::kFLOOR},
+        {"Erf", nvinfer1::UnaryOperation::kERF},
 #if IS_TRT_VERSION_GE(8, 2, 0, 0)
-      {"Round", nvinfer1::UnaryOperation::kROUND},
-      {"Sign", nvinfer1::UnaryOperation::kSIGN},
+        {"Round", nvinfer1::UnaryOperation::kROUND},
+        {"Sign", nvinfer1::UnaryOperation::kSIGN},
 #endif
-      });
+  });
   return m;
 }
 
@@ -71,7 +71,7 @@ const ActivationTypeMapType* ActivationTypeMap() {
       {"Selu", nvinfer1::ActivationType::kSELU},
       {"Softsign", nvinfer1::ActivationType::kSOFTSIGN},
       {"Softplus", nvinfer1::ActivationType::kSOFTPLUS},
-      });
+  });
   return m;
 }
 
@@ -82,7 +82,8 @@ class ConvertUnaryImpl {
 
   Status ValidateImpl(const OpConverterParams& params,
                       const std::vector<string>& not_supported_ops = {}) {
-    const auto& op = params.node_def.op();
+    const auto& node = params.node_def;
+    const auto& op = node.op();
     if (pOperMap_->find(op) == pOperMap_->end()) {
       return errors::Unimplemented("Unary op: ", op, " not supported");
     }
@@ -95,12 +96,13 @@ class ConvertUnaryImpl {
     if (!not_supported_ops.empty() && params.use_implicit_batch) {
       const auto& end = not_supported_ops.end();
       if (std::find(not_supported_ops.begin(), end, op) != end) {
-        return errors::Unimplemented(
-            "Unary op: '", op, "' is not supported in implicit batch mode");
+        const auto& err =
+            convert_not_supported_implicit(op, node.name(), "Unary");
+        return errors::Unimplemented(err);
       }
     }
 
-    return Status::OK();
+    return OkStatus();
   }
 
   Status ConvertImpl(const OpConverterParams& params) {
@@ -119,7 +121,7 @@ class ConvertUnaryImpl {
       converter->SetLayerName(layer, node_def, "recip");
     }
     params.outputs->push_back(TRT_TensorOrWeights(layer->getOutput(0)));
-    return Status::OK();
+    return OkStatus();
   }
   static constexpr std::array<InputArgSpec, 1> InputSpec() {
     return std::array<InputArgSpec, 1>{
@@ -133,42 +135,20 @@ class ConvertUnaryImpl {
 class ConvertUnary : public OpConverterBase<ConvertUnary>,
                      protected ConvertUnaryImpl<nvinfer1::UnaryOperation> {
  public:
-  explicit ConvertUnary(OpConverterParams* params)
-      : OpConverterBase<ConvertUnary>(params),
+  explicit ConvertUnary(const OpConverterParams* params)
+      : OpConverterBase<ConvertUnary>(
+            params,
+            params->node_def.op() == "Sign"
+                ? std::vector<DataType>{DataType::DT_FLOAT, DataType::DT_HALF,
+                                        DataType::DT_INT8, DT_INT32}
+                : std::vector<DataType>{DataType::DT_FLOAT, DataType::DT_HALF,
+                                        DataType::DT_INT8}),
         ConvertUnaryImpl(UnaryOperationMap()) {}
-
-  std::vector<DataType> AllowedDataTypes(OpConverterParams* params) {
-    std::vector<DataType> data_types = {
-        DataType::DT_FLOAT, DataType::DT_HALF, DataType::DT_INT8};
-
-    if (params->node_def.op() == "Sign"){
-      data_types.push_back(DataType::DT_INT32);
-    }
-
-    return data_types;
-  }
 
   static constexpr std::array<InputArgSpec, 1> InputSpec() {
     return ConvertUnaryImpl::InputSpec();
   }
 
-  static constexpr const char* NodeDefDataTypeAttributeName() {
-    /*
-    node {
-      name: "..."
-      op: "Exp"
-      input: "..."
-      attr {
-        key: "T"
-        value {
-          type: DT_FLOAT
-        }
-      }
-      ...
-    }
-    */
-    return "T";
-  }
   Status Validate() { return ValidateImpl(*params_, {"Sign", "Round"}); }
   Status Convert() { return ConvertImpl(*params_); }
 };
@@ -176,13 +156,9 @@ class ConvertUnary : public OpConverterBase<ConvertUnary>,
 class ConvertBooleanUnary : public OpConverterBase<ConvertBooleanUnary>,
                             public ConvertUnaryImpl<nvinfer1::UnaryOperation> {
  public:
-  explicit ConvertBooleanUnary(OpConverterParams* params)
-      : OpConverterBase<ConvertBooleanUnary>(params),
+  explicit ConvertBooleanUnary(const OpConverterParams* params)
+      : OpConverterBase<ConvertBooleanUnary>(params, {DataType::DT_BOOL}),
         ConvertUnaryImpl(UnaryBooleanOperationMap()) {}
-
-  std::vector<DataType> AllowedDataTypes(OpConverterParams* params) {
-    return {DataType::DT_BOOL};
-  }
 
   static constexpr std::array<InputArgSpec, 1> InputSpec() {
     return ConvertUnaryImpl::InputSpec();
@@ -212,36 +188,15 @@ class ConvertBooleanUnary : public OpConverterBase<ConvertBooleanUnary>,
 class ConvertActivation : public OpConverterBase<ConvertActivation>,
                           protected ConvertUnaryImpl<nvinfer1::ActivationType> {
  public:
-  explicit ConvertActivation(OpConverterParams* params)
+  explicit ConvertActivation(const OpConverterParams* params)
       : OpConverterBase<ConvertActivation>(params),
         ConvertUnaryImpl(ActivationTypeMap()) {}
-
-  std::vector<DataType> AllowedDataTypes(OpConverterParams* params) {
-    return {DataType::DT_FLOAT, DataType::DT_HALF};
-  }
 
   static constexpr std::array<InputArgSpec, 1> InputSpec() {
     return std::array<InputArgSpec, 1>{
         InputArgSpec::Create("input", TrtInputArg::kTensor)};
   }
 
-  static constexpr const char* NodeDefDataTypeAttributeName() {
-    /*
-    node {
-      name: "..."
-      op: "Relu"
-      input: "..."
-      attr {
-        key: "T"
-        value {
-          type: DT_FLOAT
-        }
-      }
-      ...
-    }
-    */
-    return "T";
-  }
   Status Validate() {
     TF_RETURN_IF_ERROR(ValidateImpl(*params_));
     const auto& node_def = params_->node_def;
@@ -249,7 +204,7 @@ class ConvertActivation : public OpConverterBase<ConvertActivation>,
       return GetNodeAttr(AttrSlice(node_def), "alpha", &alpha_);
     }
     alpha_ = 1.0f;
-    return Status::OK();
+    return OkStatus();
   }
   Status Convert() {
     auto* converter = params_->converter;
@@ -275,7 +230,7 @@ class ConvertActivation : public OpConverterBase<ConvertActivation>,
     }
     layer->setAlpha(alpha_);
     params_->outputs->push_back(TRT_TensorOrWeights(output_tensor));
-    return Status::OK();
+    return OkStatus();
   }
 
  private:

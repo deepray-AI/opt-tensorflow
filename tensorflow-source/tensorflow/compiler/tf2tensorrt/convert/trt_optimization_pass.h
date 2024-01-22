@@ -53,7 +53,6 @@ class TRTOptimizationPass : public grappler::CustomGraphOptimizer {
     bool use_calibration = true;
     bool use_implicit_batch = true;
     ProfileStrategy profile_strategy = ProfileStrategy::kRange;
-    bool enable_sparse_compute = true;
     bool allow_build_at_runtime = true;
     bool use_explicit_precision = false;
     int dla_core = -1;

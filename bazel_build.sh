@@ -14,6 +14,23 @@
 # LIBCUDA_FOUND - Determines whether a libcuda stub was created and needs to be cleaned (0 to clean, 1 to skip)
 # IN_CONTAINER - Flag for whether Tensorflow is being built within a container (1 for yes, 0 for bare-metal)
 # TF_API - TensorFlow API version: 1 => v1.x, 2 => 2.x
+# MB_PER_JOB - minimum host memory per bazel job
+
+MB_PER_JOB=${MB_PER_JOB:-1}
+
+AVAILABLE_MEMORY=$(cat /proc/meminfo | awk '($1 == "MemAvailable:") {print int($2/1024)}')
+NUM_CORES=$(cat /proc/cpuinfo | grep -c "^processor")
+BAZEL_JOBS=$(awk -v cores=$NUM_CORES -v mem=$AVAILABLE_MEMORY -v size=$MB_PER_JOB \
+       'BEGIN {
+          mem_limit = int(mem/size);
+          mem_limit = mem_limit < 1 ? 1 : mem_limit;
+          job_limit = mem_limit < cores ? mem_limit : cores;
+          print job_limit; 
+        }')
+
+echo "FOUND $NUM_CORES CPU cores"
+echo "FOUND $AVAILABLE_MEMORY MB of host memory"
+echo "Using $BAZEL_JOBS bazel jobs to build."
 
 THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null && pwd)"
 
@@ -80,10 +97,8 @@ echo "GCC VERSION: $(gcc --version)"
 
 cd ${SCRIPT_DIR}  # move to dl/tf/tf directory
 
-# Avoid ABORT failures on SBSA builders due to insufficeint memory.
-[[ $MAX_BUILD_JOBS -eq -1 ]] && JOBS_FLAG="" || JOBS_FLAG="-j $MAX_BUILD_JOBS"
-echo "BUILD COMMAND: bazel build $JOBS_FLAG $BAZEL_OPTS tensorflow/tools/pip_package:build_pip_package"
-bazel build $JOBS_FLAG $BAZEL_OPTS tensorflow/tools/pip_package:build_pip_package
+echo "BUILD COMMAND: bazel build -j $BAZEL_JOBS $BAZEL_OPTS tensorflow/tools/pip_package:build_pip_package"
+bazel build -j $BAZEL_JOBS $BAZEL_OPTS tensorflow/tools/pip_package:build_pip_package
 BAZEL_BUILD_RETURN=$?
 
 if [ ${BAZEL_BUILD_RETURN} -gt 0 ]
@@ -91,7 +106,7 @@ then
   exit ${BAZEL_BUILD_RETURN}
 fi
 
-bazel-bin/tensorflow/tools/pip_package/build_pip_package $WHL_OUT --gpu --project_name tensorflow
+bazel-bin/tensorflow/tools/pip_package/build_pip_package $WHL_OUT --project_name tensorflow
 PIP_PACKAGE_RETURN=$?
 if [ ${PIP_PACKAGE_RETURN} -gt 0 ]; then
   echo "Assembly of TF pip package failed."
@@ -100,7 +115,7 @@ fi
 
 if [[ $MANYLINUX_BUILD_STAGE -eq 1 ]]; then
   bazel-bin/tensorflow/tools/pip_package/build_pip_package $WHL_OUT \
-      --gpu --project_name nvidia_tensorflow --build_number $CI_PIPELINE_ID
+      --project_name nvidia_tensorflow --build_number $CI_PIPELINE_ID
   PIP_PACKAGE_RETURN=$?
   if [ ${PIP_PACKAGE_RETURN} -gt 0 ]; then
     echo "Assembly of standalone TF pip package failed."

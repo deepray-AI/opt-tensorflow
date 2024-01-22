@@ -23,6 +23,7 @@ limitations under the License.
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/strings/str_split.h"
+#include "third_party/eigen3/unsupported/Eigen/CXX11/Tensor"
 #include "tensorflow/core/framework/kernel_def_builder.h"
 #include "tensorflow/core/framework/op_kernel.h"
 #include "tensorflow/core/framework/register_types.h"
@@ -41,13 +42,6 @@ limitations under the License.
 #include "tensorflow/core/platform/types.h"
 #include "tensorflow/core/profiler/lib/traceme.h"
 #include "tensorflow/core/util/einsum_op_util.h"
-#include "third_party/eigen3/unsupported/Eigen/CXX11/Tensor"
-
-#if CUDA_CUTENSOR
-#include "third_party/gpus/cuda/include/cutensor.h"
-#define CUTENSOR_VERSION                                                      \
-  (CUTENSOR_MAJOR * 10000 + CUTENSOR_MINOR * 100 + CUTENSOR_PATCH)
-#endif
 
 #if GOOGLE_CUDA || TENSORFLOW_USE_ROCM
 #include "tensorflow/core/kernels/reduction_ops_common_gpu.h"
@@ -58,158 +52,14 @@ namespace tensorflow {
 using CPUDevice = Eigen::ThreadPoolDevice;
 using GPUDevice = Eigen::GpuDevice;
 
-static bool CuTensorReadyAndRequired() {
-#if CUDA_CUTENSOR
-  static bool load_cutensor_success = [] {
-    if (!EnableCuTensorEinsum()) {
-      return false;
-    }
-    return se::internal::DsoLoader::MaybeTryDlopenCUTENSORLibrary().ok();
-  }();
-  return load_cutensor_success;
-#endif
-   return false;
-}
-
-namespace functor {
-#if CUDA_CUTENSOR
-template <typename T>
-struct EinsumCutensorGpuFunctor;
-#endif
-template <typename Device, typename T>
-struct EinsumMaybeCutensorFunctor;
-
-}  // namespace functor
+using ShapeVec = gtl::InlinedVector<int64_t, 8>;
+using Labels = gtl::InlinedVector<int, 8>;
+using OperandLabels = gtl::InlinedVector<Labels, 2>;
+using LabelCounts = gtl::InlinedVector<int, 8>;
+using OperandLabelCounts = gtl::InlinedVector<LabelCounts, 2>;
+using LabelToDimSizes = gtl::InlinedVector<int64_t, 8>;
 
 struct EinsumHelper {
-  // Each dimension is categorized into exactly one of five types based on
-  // whether its corresponding label is present in the input and/or the output
-  // subscripts.
-  
-  typedef struct {
-    string equation;
-    OperandLabels input_labels;
-    Labels output_labels;
-    std::vector<EinsumDimensionType> label_types;
-    OperandLabelCounts input_label_counts;
-    LabelCounts output_label_counts;
-    gtl::InlinedVector<bool, 2> input_has_ellipsis;
-    bool output_has_ellipsis = false;
-    bool has_single_label = false;
-    bool support_cutensor = true;
-  } EinsumOpInputFeatures;
-
-  // Parses and validates the equation and the input shapes. Single character
-  // labels are integerized and we populate input and output label subscripts
-  // and corresponding counts. Also create the mapping from (named) labels to
-  // their EinsumDimensionType.
-  static Status ParseEquationWithCuTensorSupport(
-      const string& equation, OperandLabels* input_labels,
-      Labels* output_labels, std::vector<EinsumDimensionType>* label_types,
-      OperandLabelCounts* input_label_counts, LabelCounts* output_label_counts,
-      gtl::InlinedVector<bool, 2>* input_has_ellipsis,
-      bool* output_has_ellipsis, bool* has_single_labels,
-      bool* support_cutensor) {
-    gtl::InlinedVector<string, 2> input_str;
-    string output_str;
-    bool broadcast_required = false;
-    TF_RETURN_IF_ERROR(ValidateEinsumEquation(equation, &input_str, &output_str));
-
-    // Temporary map from single character labels to (consecutive) integer
-    // labels.
-    absl::flat_hash_map<char, int> label_mapping;
-    int num_inputs = input_str.size();
-    input_labels->resize(num_inputs);
-
-    // Map from single characters to integer labels.
-    for (int i = 0; i < num_inputs; ++i) {
-      MapToLabels(input_str[i], &input_labels->at(i), &label_mapping);
-    }
-    MapToLabels(output_str, output_labels, &label_mapping);
-
-    // Compute counts for input and output labels.
-    int num_labels = label_mapping.size();
-    input_label_counts->resize(num_inputs);
-    input_has_ellipsis->resize(num_inputs);
-    for (int i = 0; i < num_inputs; ++i) {
-      input_label_counts->at(i).resize(num_labels);
-      input_has_ellipsis->at(i) = false;
-      for (const int label : input_labels->at(i)) {
-        if (label != kEllipsisLabel)
-          input_label_counts->at(i)[label] += 1;
-        else {
-          input_has_ellipsis->at(i) = true;
-          broadcast_required = true;
-        }
-      }
-    }
-    output_label_counts->resize(num_labels);
-    *output_has_ellipsis = false;
-    for (const int label : *output_labels) {
-      if (label != kEllipsisLabel)
-        output_label_counts->at(label) += 1;
-      else {
-        *output_has_ellipsis = true;
-        if (!broadcast_required) broadcast_required = true;
-      }
-    }
-
-    // Map each label to a unique DimensionType.
-    label_types->resize(num_labels);
-    for (int label = 0; label < num_labels; ++label) {
-      if (label == kEllipsisLabel) continue;
-      bool removed = (*output_label_counts)[label] == 0;
-      bool unique = num_inputs == 1 || (*input_label_counts)[0][label] == 0 ||
-                    (*input_label_counts)[1][label] == 0;
-      (*label_types)[label] = GetDimensionType(removed, unique);
-    }
-
-    bool single_labels = false;
-    bool repeated_labels = false;
-
-    // Get repeated_labels.
-    for (int i = 0; i < num_inputs; ++i) {
-      if (!absl::c_all_of((*input_label_counts)[i],
-                          [](int c) { return c <= 1; })) {
-        repeated_labels = true;
-        break;
-      }
-    }
-
-    if (!repeated_labels) {
-      repeated_labels =
-          !absl::c_all_of(*output_label_counts, [](int c) { return c <= 1; });
-    }
-
-    // Single label is the label appears just once in one of the operand.
-    if (!broadcast_required) {
-      for (auto const& item : label_mapping) {
-        int appear_counts = 0;
-        auto label = item.second;
-        for (int j = 0; j < num_inputs; ++j) {
-          if (input_label_counts->at(j)[label]) appear_counts += 1;
-        }
-        if (appear_counts == 0) {
-          single_labels = true;
-        } else if (appear_counts < num_inputs) {
-          single_labels = (*output_label_counts)[label] == 0;
-        }
-
-        if (single_labels) break;
-      }
-    }
-
-    if (has_single_labels != nullptr) {
-      *has_single_labels = single_labels;
-    }
-
-    bool trivial_reduction =
-        equation.compare("->") == 0 || equation.compare(",->") == 0;
-    *support_cutensor = !trivial_reduction &&
-                        !repeated_labels && !broadcast_required;
-    return Status::OK();
-  }
-
   // Insert new (unnamed) broadcasting labels at the location of ellipsis.
   static void InsertBroadcastLabels(int num_bcast_dims, int num_named_labels,
                                     int ellipsis_axis, Labels* labels,
@@ -240,7 +90,7 @@ struct EinsumHelper {
           " but got dimension ", input_dim);
     }
     (*label_to_dim_sizes)[label] = input_dim;
-    return Status::OK();
+    return OkStatus();
   }
 
   // Validate input dimensions and populate unnamed labels and their label
@@ -310,7 +160,7 @@ struct EinsumHelper {
     }
     if (!absl::c_linear_search(input_has_ellipsis, true) &&
         !output_has_ellipsis) {
-      return Status::OK();
+      return OkStatus();
     }
     // Insert broadcasting dimensions in the output labels.
     auto it =
@@ -328,7 +178,7 @@ struct EinsumHelper {
     // Populate EinsumDimensionType for the new broadcasting labels.
     label_types->resize(num_named_labels + max_bcast_dims,
                         EinsumDimensionType::kBroadcasting);
-    return Status::OK();
+    return OkStatus();
   }
 
   // Permutes the labels according to the given permutation.
@@ -344,7 +194,7 @@ struct EinsumHelper {
   // Returns a reshaped input Tensor. The underlying buffer is not copied.
   static Status CopyFrom(const Tensor& input, const TensorShape& shape,
                          Tensor* output) {
-    if (output->CopyFrom(input, shape)) return Status::OK();
+    if (output->CopyFrom(input, shape)) return OkStatus();
     return errors::Internal(
         "Encountered error while reshaping a Tensor of shape ",
         input.shape().DebugString(), " to shape ", shape.DebugString());
@@ -372,7 +222,8 @@ struct EinsumHelper {
     }
     TensorShape transposed_shape;
     for (int i = 0; i < input.dims(); ++i) {
-      transposed_shape.AddDim(input.dim_size(permutation[i]));
+      TF_RETURN_IF_ERROR(
+          transposed_shape.AddDimWithStatus(input.dim_size(permutation[i])));
     }
     // For empty Tensors, just change the shape. E.g. we may need to transpose
     // from shape [1, 0, 5] to [5, 1, 0].
@@ -383,7 +234,7 @@ struct EinsumHelper {
         ctx->allocate_temp(DataTypeToEnum<T>::value, transposed_shape, output));
     const Device& device = ctx->eigen_device<Device>();
     TF_RETURN_IF_ERROR(DoTranspose(device, input, permutation, output));
-    return Status::OK();
+    return OkStatus();
   }
 
   // If there are repeated labels in either the input or output, then this
@@ -459,7 +310,7 @@ struct EinsumHelper {
             " while handling repeated indices. Up to rank 6 is supported.");
 #undef NDIMS_CASE
     }
-    return Status::OK();
+    return OkStatus();
   }
 
   // Returns true if the input dimensions are already sorted in the order
@@ -482,55 +333,11 @@ struct EinsumHelper {
     return true;
   }
 
-
-  template <typename Device, typename T>
-  struct ReduceRank2TensorGenericImplFunctor {
-    void operator()(OpKernelContext* ctx, const Tensor* input, Tensor* output,
-                    const int64 output_size, const int64 reduce_size) {
-      functor::ReduceFunctor<Device, Eigen::internal::SumReducer<T>>::Reduce(
-          ctx, output->shaped<T, 1>({output_size}),
-          const_cast<const Tensor&>(*input).shaped<T, 2>(
-              {output_size, reduce_size}),
-          Eigen::array<typename TTypes<T>::Tensor::Index, 1>({1}),
-          Eigen::internal::SumReducer<T>());
-    }
-  };
-
-  template <typename Device, typename T>
-  struct ReduceRank2TensorMayBeCutensorFunctor {
-    void operator()(OpKernelContext* ctx, const Tensor* input, Tensor* output,
-                    const int64 output_size, const int64 reduce_size) {
-      ReduceRank2TensorGenericImplFunctor<Device, T> reduce_rank2_generic;
-      reduce_rank2_generic(
-          ctx, input, output, output_size, reduce_size);
-    }
-  };
-
-  template <typename T>
-  struct ReduceRank2TensorMayBeCutensorFunctor<GPUDevice, T> {
-    void operator()(OpKernelContext* ctx, const Tensor* input, Tensor* output,
-                    const int64 output_size, const int64 reduce_size) {
-#if CUDA_CUTENSOR
-      if (CuTensorReadyAndRequired()) {
-        functor::EinsumCutensorGpuFunctor<T>::ReduceRank2Tensor(
-            ctx, input, output, output_size, reduce_size);
-      } else {
-#endif
-      ReduceRank2TensorGenericImplFunctor<GPUDevice, T> reduce_rank2_generic;
-      reduce_rank2_generic(
-          ctx, input, output, output_size, reduce_size);
-#if CUDA_CUTENSOR
-      }
-#endif
-    }
-  };
-
   template <typename Device, typename T>
   static Status ReduceOperand(
       OpKernelContext* ctx, const Tensor& input,
       const std::vector<EinsumDimensionType>& label_types,
-      const LabelCounts& label_counts, const bool has_single_label,
-      Labels* labels, Labels* free_labels,
+      const LabelCounts& label_counts, Labels* labels, Labels* free_labels,
       bool* swap_free_and_contract, Tensor* output) {
     // Find the permutation to transpose the input dimensions in the order of
     // EinsumDimensionType; i.e. batch, free, contract and reduce dimensions.
@@ -576,7 +383,7 @@ struct EinsumHelper {
       int64_t dim = input_deduped.dim_size(label_idx);
       if (label_types[label] == EinsumDimensionType::kBroadcasting ||
           label_types[label] == EinsumDimensionType::kBatch) {
-        output_shape.AddDim(dim);
+        TF_RETURN_IF_ERROR(output_shape.AddDimWithStatus(dim));
       } else if (label_types[label] == EinsumDimensionType::kFree) {
         free_labels->push_back(label);
       }
@@ -585,8 +392,10 @@ struct EinsumHelper {
     if (*swap_free_and_contract)
       std::swap(reshape[EinsumDimensionType::kFree],
                 reshape[EinsumDimensionType::kContract]);
-    output_shape.AddDim(reshape[EinsumDimensionType::kFree]);
-    output_shape.AddDim(reshape[EinsumDimensionType::kContract]);
+    TF_RETURN_IF_ERROR(
+        output_shape.AddDimWithStatus(reshape[EinsumDimensionType::kFree]));
+    TF_RETURN_IF_ERROR(
+        output_shape.AddDimWithStatus(reshape[EinsumDimensionType::kContract]));
 
     if (reshape[EinsumDimensionType::kReduce] ==
         1) {  // No need to actually reduce.
@@ -598,19 +407,13 @@ struct EinsumHelper {
     using Index = typename TTypes<T>::Tensor::Index;
     // Reduce along the last axis (i.e axis 1) of the rank-2 Tensor.
     const int64_t output_size = reshape[kBroadcasting] * reshape[kBatch] *
-                              reshape[kFree] * reshape[kContract];
-    
-    if (!has_single_label) {
-      ReduceRank2TensorMayBeCutensorFunctor<Device, T> rank2_tensor_reduction;
-      rank2_tensor_reduction(ctx, &input_deduped, output, output_size,
-                             reshape[kReduce]);
-    } else {
-      ReduceRank2TensorGenericImplFunctor<Device, T> rank2_tensor_reduction;
-      rank2_tensor_reduction(ctx, &input_deduped, output, output_size,
-                             reshape[kReduce]);
-    }
-
-    return Status::OK();
+                                reshape[kFree] * reshape[kContract];
+    functor::ReduceFunctor<Device, Reducer>::Reduce(
+        ctx, output->shaped<T, 1>({output_size}),
+        const_cast<const Tensor&>(input_deduped)
+            .shaped<T, 2>({output_size, reshape[kReduce]}),
+        Eigen::array<Index, 1>({1}), Reducer());
+    return OkStatus();
   }
 
   // Reshapes a Tensor of shape [b0,b1...bk,N,M] to [prod(b0,b1...bk),N,M].
@@ -621,111 +424,6 @@ struct EinsumHelper {
                                 input.dim_size(rank - 1)};
     return CopyFrom(input, output_shape, output);
   }
-
-  template <typename Device, typename T>
-  struct ContractRank3TensorsFunctor {
-    void operator()(OpKernelContext* ctx, const Tensor& input0,
-                    const Tensor& input1, const bool trans_x,
-                    const bool trans_y, const MatMulBCast& bcast,
-                    Tensor* output) {
-      Tensor lhs, rhs;
-      OP_REQUIRES_OK(ctx, ReshapeToRank3(input0, bcast.x_batch_size(), &lhs));
-      OP_REQUIRES_OK(ctx, ReshapeToRank3(input1, bcast.y_batch_size(), &rhs));
-
-      LaunchBatchMatMul<Device, T>::Launch(ctx, lhs, rhs, /*adj_x=*/false,
-                                           /*adj_y=*/false, trans_x, trans_y,
-                                           bcast, output);
-    }
-  };
-
-  template <typename T>
-  struct ContractRank3TensorsFunctor<GPUDevice, T> {
-    void operator()(OpKernelContext* ctx, const Tensor& input0,
-                    const Tensor& input1, const bool trans_x,
-                    const bool trans_y, const MatMulBCast& bcast,
-                    Tensor* output) {
-      // Strided batched gemm and no broadcasting required, dispatch to
-      // cuTENSOR's ContractRank3TensorsFunctor
-#if CUDA_CUTENSOR
-      if (CuTensorReadyAndRequired()) {
-        std::vector<int> input0_shape, input1_shape;
-        for (int i = 0; i < input0.dims() - 2; ++i)
-          input0_shape.push_back(input0.dim_size(i));
-        for (int i = 0; i < input1.dims() - 2; ++i)
-          input1_shape.push_back(input1.dim_size(i));
-
-        int max_input_rank = std::max(input0_shape.size(), input1_shape.size());
-        int min_input_rank = std::min(input0_shape.size(), input1_shape.size());
-        for (int i = 0; i < max_input_rank - min_input_rank; ++i) {
-          if (input0_shape.size() > input1_shape.size())
-            input1_shape.insert(input1_shape.begin(), 1);
-          else
-            input0_shape.insert(input0_shape.begin(), 1);
-        }
-
-        string op0_equation, op1_equation, rhs_equation;
-        int index_cnt = 0;
-        constexpr char first_ascii_charactor = 'a';
-        for (int i = 0; i < max_input_rank; i++) {
-          if (input0_shape[i] == input1_shape[i] && input0_shape[i] == 1)
-            continue;
-          char ascii_charactor = first_ascii_charactor + index_cnt++;
-          if (input0_shape[i] != input1_shape[i]) {
-            input0_shape[i] > 1 ? op0_equation += ascii_charactor
-                                : op1_equation += ascii_charactor;
-          } else {
-            op0_equation += ascii_charactor;
-            op1_equation += ascii_charactor;
-          }
-          rhs_equation += ascii_charactor;
-        }
-
-        // 4 possible transposes in matmul.
-        const std::vector<string> candidate_equations{"xy,yz->xz", "xy,zy->xz",
-                                                      "yx,yz->xz", "yx,zy->xz"};
-
-        string matmul_equation =
-            candidate_equations.at(2 * int(trans_x) + int(trans_y));
-        string equation = op0_equation + matmul_equation.substr(0, 2) + "," +
-                          op1_equation + matmul_equation.substr(3, 2) + "->" +
-                          rhs_equation + matmul_equation.substr(7, 2);
-
-        std::vector<int> input0_shape_squeezed, input1_shape_squeezed;
-        for (int i = 0; i < input0.dims() - 2; ++i) {
-          if (input0.dim_size(i) > 1)
-            input0_shape_squeezed.push_back(input0.dim_size(i));
-        }
-        for (int i = 0; i < input1.dims() - 2; ++i) {
-          if (input1.dim_size(i) > 1)
-            input1_shape_squeezed.push_back(input1.dim_size(i));
-        }
-        input0_shape_squeezed.push_back(input0.dim_size(input0.dims() - 2));
-        input0_shape_squeezed.push_back(input0.dim_size(input0.dims() - 1));
-        input1_shape_squeezed.push_back(input1.dim_size(input1.dims() - 2));
-        input1_shape_squeezed.push_back(input1.dim_size(input1.dims() - 1));
-
-        functor::EinsumCutensorGpuFunctor<T>::ContractRank3Tensors(
-            ctx, equation, &input0, &input1, input0_shape_squeezed,
-            input1_shape_squeezed, output);
-      } else {
-#endif
-      if (CuTensorReadyAndRequired()) {
-        VLOG(1) << "WARNING: " << "CuTENSOR support is requested but TF was "
-                                  "not built with libcutensor, so fallbacks "
-                                  "to generic GPU kernel.";
-      }
-      Tensor rhs, lhs;
-      OP_REQUIRES_OK(ctx, ReshapeToRank3(input0, bcast.x_batch_size(), &lhs));
-      OP_REQUIRES_OK(ctx, ReshapeToRank3(input1, bcast.y_batch_size(), &rhs));
-
-      LaunchBatchMatMul<GPUDevice, T>::Launch(ctx, lhs, rhs, /*adj_x=*/false,
-                                              /*adj_y=*/false, trans_x,
-                                              trans_y, bcast, output);
-#if CUDA_CUTENSOR
-      }
-#endif
-     }
-  };
 
   // Contracts the inputs along the last axis (or the second last if the
   // corresponding value of swap_free_and_contract is true). The batch
@@ -748,58 +446,64 @@ struct EinsumHelper {
           "Invalid broadcasting dimensions: ", inputs[0].shape().DebugString(),
           " vs. ", inputs[1].shape().DebugString());
     }
-
+    Tensor lhs;
+    TF_RETURN_IF_ERROR(ReshapeToRank3(inputs[0], bcast.x_batch_size(), &lhs));
+    Tensor rhs;
+    TF_RETURN_IF_ERROR(ReshapeToRank3(inputs[1], bcast.y_batch_size(), &rhs));
     TensorShape output_shape = bcast.output_batch_shape();
     for (int i = 0; i < inputs.size(); ++i) {
       const int64_t free_axis =
           inputs[i].dims() - (swap_free_and_contract[i] ? 1 : 2);
-      output_shape.AddDim(inputs[i].dim_size(free_axis));
+      TF_RETURN_IF_ERROR(
+          output_shape.AddDimWithStatus(inputs[i].dim_size(free_axis)));
     }
     bool trans_x = swap_free_and_contract[0];
     bool trans_y = !swap_free_and_contract[1];
-
     TF_RETURN_IF_ERROR(
         ctx->allocate_temp(DataTypeToEnum<T>::value, output_shape, output));
-    if (inputs[0].NumElements() == 0 || inputs[1].NumElements() == 0) {
+    if (lhs.NumElements() == 0 || rhs.NumElements() == 0) {
       functor::SetZeroFunctor<Device, T> set_zero;
       set_zero(ctx->eigen_device<Device>(), output->flat<T>());
-      return Status::OK();
+      return OkStatus();
     }
     Tensor output_reshaped;
     TF_RETURN_IF_ERROR(
         ReshapeToRank3(*output, bcast.output_batch_size(), &output_reshaped));
-
-    ContractRank3TensorsFunctor<Device, T> rank3_tensors_contraction_func;
-    rank3_tensors_contraction_func(ctx, inputs[0], inputs[1], trans_x, trans_y,
-                                   bcast, &output_reshaped);
-
-    return Status::OK();
+    LaunchBatchMatMul<Device, T>::Launch(ctx, lhs, rhs, /*adj_x=*/false,
+                                         /*adj_y=*/false, trans_x, trans_y,
+                                         bcast, &output_reshaped);
+    return OkStatus();
   }
 };
 
-namespace functor {
-
 template <typename Device, typename T>
-struct EinsumMaybeCutensorFunctor {
-  void operator()(OpKernelContext* ctx,
-                  const EinsumHelper::EinsumOpInputFeatures& features) {
+class EinsumOp : public OpKernel {
+ public:
+  explicit EinsumOp(OpKernelConstruction* c) : OpKernel(c) {
+    OP_REQUIRES_OK(c, c->GetAttr("equation", &equation_));
+    OP_REQUIRES_OK(
+        c, ParseEinsumEquation(equation_, &input_labels_, &output_labels_,
+                               &label_types_, &input_label_counts_,
+                               &output_label_counts_, &input_has_ellipsis_,
+                               &output_has_ellipsis_));
+  }
+
+  void Compute(OpKernelContext* ctx) override {
     OpInputList inputs;
     OP_REQUIRES_OK(ctx, ctx->input_list("inputs", &inputs));
 
-    OperandLabels input_labels(features.input_labels);
-    Labels output_labels(features.output_labels);
-    gtl::InlinedVector<bool, 2> input_has_ellipsis(features.input_has_ellipsis);
-    bool output_has_ellipsis(features.output_has_ellipsis);
-    std::vector<EinsumDimensionType> label_types(features.label_types);
-    OperandLabelCounts input_label_counts(features.input_label_counts);
-    LabelCounts output_label_counts(features.output_label_counts);
+    OperandLabels input_labels(input_labels_);
+    Labels output_labels(output_labels_);
+    std::vector<EinsumDimensionType> label_types(label_types_);
+    OperandLabelCounts input_label_counts(input_label_counts_);
+    LabelCounts output_label_counts(output_label_counts_);
     LabelToDimSizes label_to_dim_sizes;
 
-    OP_REQUIRES_OK(
-        ctx, EinsumHelper::ProcessDimensions(
-                 inputs, input_has_ellipsis, output_has_ellipsis, &input_labels,
-                 &output_labels, &label_types, &input_label_counts,
-                 &output_label_counts, &label_to_dim_sizes));
+    OP_REQUIRES_OK(ctx, EinsumHelper::ProcessDimensions(
+                            inputs, input_has_ellipsis_, output_has_ellipsis_,
+                            &input_labels, &output_labels, &label_types,
+                            &input_label_counts, &output_label_counts,
+                            &label_to_dim_sizes));
 
     // The reduction phase (a) sums across reduction dimensions, (b) takes
     // generalized diagonals, and (c) reshapes it into shape
@@ -814,7 +518,6 @@ struct EinsumMaybeCutensorFunctor {
       OP_REQUIRES_OK(ctx,
                      EinsumHelper::ReduceOperand<Device, T>(
                          ctx, inputs[i], label_types, input_label_counts[i],
-                         features.has_single_label,
                          &input_labels[i], &free_labels[i],
                          &swap_free_and_contract[i], &inputs_reduced[i]));
     }
@@ -847,7 +550,8 @@ struct EinsumMaybeCutensorFunctor {
     for (int i = 0; i < num_inputs; ++i) {
       for (int label : free_labels[i]) {
         result_labels.push_back(label);
-        result_shape.AddDim(label_to_dim_sizes[label]);
+        OP_REQUIRES_OK(
+            ctx, result_shape.AddDimWithStatus(label_to_dim_sizes[label]));
       }
     }
 
@@ -900,216 +604,31 @@ struct EinsumMaybeCutensorFunctor {
                             ctx, output_inflated, output_permutation, &output));
     ctx->set_output(0, output);
   }
-};
 
-#if CUDA_CUTENSOR
-template <typename T>
-struct EinsumCutensorGpuFunctor {
-  static void ContractRank3Tensors(OpKernelContext* ctx, const string& equation,
-                                   const Tensor* input0, const Tensor* input1,
-                                   const std::vector<int> input0_shape,
-                                   const std::vector<int> input1_shape,
-                                   Tensor* output_tensor) {
-    Compute(ctx, equation, {input0, input1}, {input0_shape, input1_shape},
-            &output_tensor);
-  }
-
-  static void ReduceRank2Tensor(OpKernelContext* ctx, const Tensor* input,
-                                Tensor* output, const int64 output_size,
-                                const int64 reduce_size) {
-    if (!output_size || !reduce_size) {
-      functor::SetZeroFunctor<Eigen::GpuDevice, T> set_zero;
-      set_zero(ctx->eigen_device<Eigen::GpuDevice>(), output->flat<T>());
-      return;
-    }
-    gtl::InlinedVector<std::vector<int>, 2> input_shape;
-    input_shape.push_back({output_size, reduce_size});
-    Compute(ctx, "ab->a", {input}, input_shape, &output);
-  }
-
-  void operator()(OpKernelContext* ctx,
-                  EinsumHelper::EinsumOpInputFeatures features) {
-    OpInputList inputs;
-    OP_REQUIRES_OK(ctx, ctx->input_list("inputs", &inputs));
-    const int num_inputs = inputs.size();
-
-    LabelToDimSizes label_to_dim_sizes;
-
-    OP_REQUIRES_OK(
-        ctx,
-        EinsumHelper::ProcessDimensions(
-            inputs, features.input_has_ellipsis, features.output_has_ellipsis,
-            &(features.input_labels), &(features.output_labels),
-            &(features.label_types), &(features.input_label_counts),
-            &(features.output_label_counts), &label_to_dim_sizes));
-
-    gtl::InlinedVector<const Tensor*, 2> input_tensors;
-    gtl::InlinedVector<std::vector<int>, 2> input_tensor_shapes;
-    for (int i = 0; i < num_inputs; ++i) {
-      input_tensors.push_back(&inputs[i]);
-      std::vector<int> input_shape;
-      for (int j = 0; j < inputs[i].dims(); ++j) {
-        input_shape.push_back(inputs[i].dim_size(j));
+  string TraceString(const OpKernelContext& ctx, bool verbose) const override {
+    string op = profiler::TraceMeOp(name_view(), type_string_view());
+    string equation = strings::StrCat("(", equation_, ")");
+    if (verbose) {
+      string shape = ShapeTraceString(ctx);
+      if (!shape.empty()) {
+        return profiler::TraceMeEncode(
+            std::move(op), {{"equation", equation}, {"shape", shape}});
       }
-      input_tensor_shapes.push_back(input_shape);
     }
-    Compute(ctx, features.equation, input_tensors, input_tensor_shapes);
+    return profiler::TraceMeEncode(std::move(op), {{"equation", equation}});
   }
 
  private:
-  static void Compute(
-      OpKernelContext* ctx, const string equation,
-      const gtl::InlinedVector<const Tensor*, 2>& input_tensors,
-      const gtl::InlinedVector<std::vector<int>, 2>& input_tensor_shapes,
-      Tensor** output_tensor_init = nullptr) {
-    const int num_inputs = input_tensors.size();
-    const Tensor* input_0_tensor = input_tensors[0];
-    const Tensor* input_1_tensor;
-
-    if (num_inputs == 2) {
-      input_1_tensor = input_tensors[1];
-    }
-
-    std::vector<int64> output_dims;
-    T alpha = (T)1.0f;
-    T beta = (T)0.0f;
-    size_t worksize = 0;
-
-    auto* stream = ctx->op_device_context()->stream();
-    OP_REQUIRES_OK(ctx, stream->parent()->AsTsr()->CutensorPreprocess(
-                            stream, &output_dims, se::tsr::ToDataType<T>::value,
-                            equation, input_tensor_shapes[0],
-                            num_inputs == 2 ? input_tensor_shapes[1]
-                                            : std::vector<int>()));
-
-    Tensor* output_tensor(nullptr);
-    TensorShape output_shape = TensorShape(output_dims);
-
-    if (output_tensor_init == nullptr) {
-      OP_REQUIRES_OK(ctx,
-                     ctx->allocate_output(0, output_shape, &output_tensor));
-    } else {
-      output_tensor = *output_tensor_init;
-    }
-
-    bool input_has_empty_dim =
-        !absl::c_all_of(input_tensor_shapes[0], [](int c) { return c > 0; }) ||
-        (num_inputs == 2 &&
-         !absl::c_all_of(input_tensor_shapes[1], [](int c) { return c > 0; }));
-
-    if (input_has_empty_dim ||
-        !absl::c_all_of(output_dims, [](int c) { return c > 0; })) {
-      functor::SetZeroFunctor<Eigen::GpuDevice, T> set_zero;
-      set_zero(ctx->eigen_device<Eigen::GpuDevice>(), output_tensor->flat<T>());
-      return;
-    }
-
-    OP_REQUIRES(
-        ctx,
-        stream->parent()->AsTsr()->PrepareContraction(
-            stream, &worksize, input_0_tensor->flat<T>().data(),
-            num_inputs == 1 ? nullptr : input_1_tensor->flat<T>().data(),
-            output_tensor->flat<T>().data()),
-        errors::Internal("Preparation for contraction failed!"));
-
-    Tensor work_tensor;
-    int64 work_tensor_size = worksize / sizeof(int8);
-    TensorShape work_shape = {work_tensor_size};
-    OP_REQUIRES_OK(ctx, ctx->allocate_temp(DT_INT8, work_shape, &work_tensor));
-
-    OP_REQUIRES(
-        ctx,
-        stream
-            ->ThenTsrContraction(
-                input_0_tensor->flat<T>().data(),
-                num_inputs == 1 ? nullptr : input_1_tensor->flat<T>().data(),
-                output_tensor->flat<T>().data(),
-                work_tensor.flat<int8>().data())
-            .ok(),
-        errors::Internal("Compute by CuTensor failed!"));
-  }
-};
-#endif // CUDA_CUTENSOR
-}  // namespace functor
-
-template <typename Device, typename T>
-class EinsumOp : public OpKernel {
- public:
-  explicit EinsumOp(OpKernelConstruction* c) : OpKernel(c) {
-    OP_REQUIRES_OK(c, c->GetAttr("equation", &(InputFeatures.equation)));
-    OP_REQUIRES_OK(
-        c, ParseEinsumEquation(
-               InputFeatures.equation, &(InputFeatures.input_labels),
-               &(InputFeatures.output_labels), &(InputFeatures.label_types),
-               &(InputFeatures.input_label_counts),
-               &(InputFeatures.output_label_counts),
-               &(InputFeatures.input_has_ellipsis),
-               &(InputFeatures.output_has_ellipsis)));
-  }
-
-  void Compute(OpKernelContext* ctx) override {
-    functor::EinsumMaybeCutensorFunctor<Device, T> einsum_generic_func;
-    einsum_generic_func(ctx, InputFeatures);
-  }
-
- private:
-  EinsumHelper::EinsumOpInputFeatures InputFeatures;
+  string equation_;
+  OperandLabels input_labels_;
+  Labels output_labels_;
+  std::vector<EinsumDimensionType> label_types_;
+  OperandLabelCounts input_label_counts_;
+  LabelCounts output_label_counts_;
+  gtl::InlinedVector<bool, 2> input_has_ellipsis_;
+  bool output_has_ellipsis_ = false;
 };
 
-template <typename T>
-class EinsumOp<GPUDevice, T> : public OpKernel {
- public:
-  explicit EinsumOp(OpKernelConstruction* c) : OpKernel(c) {
-    OP_REQUIRES_OK(c, c->GetAttr("equation", &(InputFeatures.equation)));
-    OP_REQUIRES_OK(
-        c, EinsumHelper::ParseEquationWithCuTensorSupport(
-           InputFeatures.equation, &(InputFeatures.input_labels),
-          &(InputFeatures.output_labels), &(InputFeatures.label_types),
-          &(InputFeatures.input_label_counts),
-          &(InputFeatures.output_label_counts),
-          &(InputFeatures.input_has_ellipsis),
-          &(InputFeatures.output_has_ellipsis),
-          &(InputFeatures.has_single_label),
-          &(InputFeatures.support_cutensor)));
-#if CUDA_CUTENSOR
-    cutsr_ready_and_required = CuTensorReadyAndRequired();
-#endif
-  }
-
-  void Compute(OpKernelContext* ctx) override {
-#if CUDA_CUTENSOR
-#if CUTENSOR_VERSION >= 10500
-    // cuTENSOR only starts to support single label reduction/contraction after
-    // version 1.5.0.
-    bool use_direct_cutensor =
-        cutsr_ready_and_required && InputFeatures.support_cutensor;
-#else
-    bool use_direct_cutensor = cutsr_ready_and_required &&
-                               InputFeatures.support_cutensor &&
-                               !InputFeatures.has_single_label;
-#endif
-    if (use_direct_cutensor) {
-      functor::EinsumCutensorGpuFunctor<T> einsum_cutensor_func;
-      einsum_cutensor_func(ctx, InputFeatures);
-    } else {
-#endif
-    if (cutsr_ready_and_required) {
-      VLOG(1) << "WARNING: " << "CuTENSOR support is requested but either TF "
-                                "was not built with libcutensor or equation is "
-                                "not currently supported so fallbacks to "
-                                "generic GPU kernel.";
-    }
-    functor::EinsumMaybeCutensorFunctor<GPUDevice, T> einsum_generic_func;
-    einsum_generic_func(ctx, InputFeatures);
-#if CUDA_CUTENSOR
-    }
-#endif
-  }
-
- private:
-  EinsumHelper::EinsumOpInputFeatures InputFeatures;
-  bool cutsr_ready_and_required = false;
-};
 #if GOOGLE_CUDA || TENSORFLOW_USE_ROCM
 // Forward declarations of the functor specializations for GPU.
 namespace functor {
@@ -1126,14 +645,6 @@ namespace functor {
       const Eigen::DSizes<Eigen::DenseIndex, N>& strides,           \
       typename TTypes<T, N>::Tensor output);                        \
   extern template struct InflateFunctor<GPUDevice, T, N>;
-#if CUDA_CUTENSOR
-#define DECLARE_GPU_SPEC_FOR_EINSUM(T) \
-  template struct EinsumCutensorGpuFunctor<T>;
-  DECLARE_GPU_SPEC_FOR_EINSUM(float);
-  DECLARE_GPU_SPEC_FOR_EINSUM(double);
-  DECLARE_GPU_SPEC_FOR_EINSUM(Eigen::half);
-#undef DECLARE_GPU_SPEC_FOR_EINSUM
-#endif
 
 #define DECLARE_GPU_SPECS(T) \
   DECLARE_GPU_SPEC(T, 1);    \
@@ -1143,10 +654,7 @@ namespace functor {
   DECLARE_GPU_SPEC(T, 5);    \
   DECLARE_GPU_SPEC(T, 6);
 
-DECLARE_GPU_SPECS(float);
-DECLARE_GPU_SPECS(double);
-DECLARE_GPU_SPECS(Eigen::half);
-
+TF_CALL_GPU_NUMBER_TYPES(DECLARE_GPU_SPECS);
 // TODO(rocm): Enable once complex types are supported.
 #if GOOGLE_CUDA
 DECLARE_GPU_SPECS(complex64);
@@ -1160,4 +668,3 @@ DECLARE_GPU_SPECS(complex128);
 }  // namespace tensorflow
 
 #endif  // TENSORFLOW_CORE_KERNELS_LINALG_EINSUM_OP_IMPL_H_
-

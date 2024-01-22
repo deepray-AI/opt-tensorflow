@@ -20,6 +20,7 @@ from absl.testing import parameterized
 import numpy as np
 import scipy.linalg
 
+from tensorflow.python.framework import config
 from tensorflow.python.framework import constant_op
 from tensorflow.python.framework import dtypes
 from tensorflow.python.framework import ops
@@ -42,8 +43,13 @@ def _RandomPDMatrix(n, rng, dtype=np.float64):
 
 class CholeskySolveTest(test.TestCase):
 
+  def tearDown(self):
+    config.enable_tensor_float_32_execution(self.tf32_keep_)
+
   def setUp(self):
     self.rng = np.random.RandomState(0)
+    self.tf32_keep_ = config.tensor_float_32_execution_enabled()
+    config.enable_tensor_float_32_execution(False)
 
   @test_util.run_deprecated_v1
   def test_works_with_five_different_random_pos_def_matrices(self):
@@ -380,6 +386,13 @@ class PinvTestDynamic32DefaultRcond(test.TestCase, _PinvTest):
   use_static_shape = False
   use_default_rcond = True
 
+  def tearDown(self):
+    config.enable_tensor_float_32_execution(self.tf32_keep_)
+
+  def setUp(self):
+    self.tf32_keep_ = config.tensor_float_32_execution_enabled()
+    config.enable_tensor_float_32_execution(False)
+
 
 @test_util.run_all_in_graph_and_eager_modes
 class PinvTestStatic64DefaultRcond(test.TestCase, _PinvTest):
@@ -387,12 +400,26 @@ class PinvTestStatic64DefaultRcond(test.TestCase, _PinvTest):
   use_static_shape = True
   use_default_rcond = True
 
+  def tearDown(self):
+    config.enable_tensor_float_32_execution(self.tf32_keep_)
+
+  def setUp(self):
+    self.tf32_keep_ = config.tensor_float_32_execution_enabled()
+    config.enable_tensor_float_32_execution(False)
+
 
 @test_util.run_all_in_graph_and_eager_modes
 class PinvTestDynamic32CustomtRcond(test.TestCase, _PinvTest):
   dtype = np.float32
   use_static_shape = False
   use_default_rcond = False
+
+  def tearDown(self):
+    config.enable_tensor_float_32_execution(self.tf32_keep_)
+
+  def setUp(self):
+    self.tf32_keep_ = config.tensor_float_32_execution_enabled()
+    config.enable_tensor_float_32_execution(False)
 
 
 @test_util.run_all_in_graph_and_eager_modes

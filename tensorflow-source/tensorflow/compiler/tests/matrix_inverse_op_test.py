@@ -18,6 +18,7 @@ import numpy as np
 
 from tensorflow.compiler.tests import xla_test
 from tensorflow.python.framework import dtypes
+from tensorflow.python.framework import test_util
 from tensorflow.python.ops import array_ops
 from tensorflow.python.ops import linalg_ops
 from tensorflow.python.ops import math_ops
@@ -55,6 +56,7 @@ class InverseOpTest(xla_test.XLATestCase):
     matrix_batch = np.tile(matrix_batch, [2, 3, 1, 1])
     return matrix_batch
 
+  @test_util.run_without_tensor_float_32('TF32 capable devices fail the test')
   def testNonsymmetric(self):
     # 2x2 matrices
     matrix1 = np.array([[1., 2.], [3., 4.]])

@@ -1,7 +1,8 @@
-load("//tensorflow:tensorflow.bzl", "cuda_py_test")
+load("//tensorflow:tensorflow.default.bzl", "cuda_py_test")
 load("//tensorflow:tensorflow.bzl", "py_test")  # @unused
 
 package(
+    # copybara:uncomment default_applicable_licenses = ["//tensorflow:license"],
     default_visibility = ["//tensorflow:internal"],
     licenses = ["notice"],
 )
@@ -26,8 +27,12 @@ cuda_py_test(
     shard_count = 16,
     deps = [
         "//tensorflow/python:client_testlib",
+        "//tensorflow/python:framework",
         "//tensorflow/python:framework_for_generated_wrappers",
-        "//tensorflow/python/ops/signal",
+        "//tensorflow/python:framework_test_lib",
+        "//tensorflow/python/eager:def_function",
+        "//tensorflow/python/ops/signal:dct_ops",
+        "//tensorflow/python/platform:tf_logging",
         "//third_party/py/numpy",
         "@absl_py//absl/testing:parameterized",
     ],
@@ -46,8 +51,9 @@ cuda_py_test(
     deps = [
         "//tensorflow/python:client_testlib",
         "//tensorflow/python:framework_for_generated_wrappers",
+        "//tensorflow/python:gradient_checker_v2",
         "//tensorflow/python:math_ops",
-        "//tensorflow/python/ops/signal",
+        "//tensorflow/python/ops/signal:fft_ops",
         "//third_party/py/numpy",
     ],
 )
@@ -59,7 +65,7 @@ cuda_py_test(
     deps = [
         ":test_util",
         "//tensorflow/python:client_testlib",
-        "//tensorflow/python/ops/signal",
+        "//tensorflow/python/ops/signal:mel_ops",
         "//third_party/py/numpy",
     ],
 )
@@ -73,7 +79,7 @@ cuda_py_test(
         "//tensorflow/python:framework",
         "//tensorflow/python:framework_for_generated_wrappers",
         "//tensorflow/python:framework_test_lib",
-        "//tensorflow/python/ops/signal",
+        "//tensorflow/python/ops/signal:mfcc_ops",
         "//third_party/py/numpy",
         "@absl_py//absl/testing:parameterized",
     ],
@@ -89,10 +95,11 @@ cuda_py_test(
         "//tensorflow/python:framework",
         "//tensorflow/python:framework_for_generated_wrappers",
         "//tensorflow/python:framework_test_lib",
+        "//tensorflow/python:gradient_checker_v2",
         "//tensorflow/python:gradients",
         "//tensorflow/python:math_ops",
         "//tensorflow/python:platform_test",
-        "//tensorflow/python/ops/signal",
+        "//tensorflow/python/ops/signal:reconstruction_ops",
         "//third_party/py/numpy",
         "@absl_py//absl/testing:parameterized",
     ],
@@ -111,7 +118,7 @@ cuda_py_test(
         "//tensorflow/python:framework_test_lib",
         "//tensorflow/python:math_ops",
         "//tensorflow/python:platform_test",
-        "//tensorflow/python/ops/signal",
+        "//tensorflow/python/ops/signal:shape_ops",
         "//third_party/py/numpy",
     ],
 )
@@ -131,11 +138,13 @@ cuda_py_test(
         "//tensorflow/python:framework",
         "//tensorflow/python:framework_for_generated_wrappers",
         "//tensorflow/python:framework_test_lib",
+        "//tensorflow/python:gradient_checker_v2",
         "//tensorflow/python:gradients",
         "//tensorflow/python:math_ops",
         "//tensorflow/python:platform_test",
         "//tensorflow/python:random_ops",
-        "//tensorflow/python/ops/signal",
+        "//tensorflow/python/ops/signal:spectral_ops",
+        "//tensorflow/python/ops/signal:window_ops",
         "//third_party/py/numpy",
         "@absl_py//absl/testing:parameterized",
     ],
@@ -157,7 +166,7 @@ cuda_py_test(
         "//tensorflow/python:framework_for_generated_wrappers",
         "//tensorflow/python:framework_test_lib",
         "//tensorflow/python:platform_test",
-        "//tensorflow/python/ops/signal",
+        "//tensorflow/python/ops/signal:window_ops",
         "//third_party/py/numpy",
     ],
 )

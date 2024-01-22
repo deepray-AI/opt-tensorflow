@@ -19,7 +19,6 @@ import unittest
 import numpy as np
 
 from tensorflow.python.compiler.tensorrt.test import tf_trt_integration_test_base as trt_test
-from tensorflow.python.compiler.tensorrt.test import test_utils as trt_test_utils
 from tensorflow.python.framework import constant_op
 from tensorflow.python.framework import dtypes
 from tensorflow.python.ops import array_ops
@@ -69,9 +68,11 @@ class BatchMatMulTwoTensorTest(BatchMatMultTestBase):
     return {"TRTEngineOp_000": ["matmul", "relu"]}
 
 
-@trt_test_utils.disable_tf32_testing
 class BatchMatMulWeightBroadcastTest(BatchMatMultTestBase):
   """Testing BatchMatMulV2: one operand is weight and both have same rank."""
+
+  def ShouldAllowTF32Computation(self):
+    return False
 
   def GraphFn(self, inp):
     dtype = inp.dtype
@@ -89,9 +90,11 @@ class BatchMatMulWeightBroadcastTest(BatchMatMultTestBase):
     return {"TRTEngineOp_000": ["matmul", "kernel"]}
 
 
-@trt_test_utils.disable_tf32_testing
 class BatchMatMulWeightBroadcastDims2Test(BatchMatMultTestBase):
   """Testing BatchMatMulV2: weight operand must be broadcasted."""
+
+  def ShouldAllowTF32Computation(self):
+    return False
 
   def GraphFn(self, inp):
     dtype = inp.dtype

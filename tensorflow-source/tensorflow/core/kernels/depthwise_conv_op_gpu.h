@@ -19,6 +19,7 @@ limitations under the License.
 #if GOOGLE_CUDA || TENSORFLOW_USE_ROCM
 #define EIGEN_USE_GPU
 
+#include "third_party/eigen3/unsupported/Eigen/CXX11/Tensor"
 #include "tensorflow/core/framework/op_kernel.h"
 #include "tensorflow/core/kernels/depthwise_conv_op.h"
 #include "tensorflow/core/kernels/gpu_prim.h"
@@ -26,7 +27,6 @@ limitations under the License.
 #include "tensorflow/core/util/determinism.h"
 #include "tensorflow/core/util/gpu_kernel_helper.h"
 #include "tensorflow/core/util/tensor_format.h"
-#include "third_party/eigen3/unsupported/Eigen/CXX11/Tensor"
 
 #if defined(_MSC_VER) && !defined(__clang__)
 #define UNROLL
@@ -45,6 +45,10 @@ struct PseudoHalfType {
 };
 template <>
 struct PseudoHalfType<Eigen::half> {
+  using Type = float;
+};
+template <>
+struct PseudoHalfType<Eigen::bfloat16> {
   using Type = float;
 };
 }  // namespace detail
@@ -344,14 +348,14 @@ __global__ void __launch_bounds__(1024, 2)
       kKnownFilterHeight < 0 ? args.filter_rows : kKnownFilterHeight;
   const int filter_width =
       kKnownFilterWidth < 0 ? args.filter_cols : kKnownFilterWidth;
-  const int depth_multiplier =
+  const FastDividerUint32 depth_multiplier =
       kKnownDepthMultiplier < 0 ? args.depth_multiplier : kKnownDepthMultiplier;
   const int stride = args.stride;
   const int pad_height = args.pad_rows;
   const int pad_width = args.pad_cols;
-  const int out_height = args.out_rows;
   const int out_width = args.out_cols;
-  const int out_depth = args.out_depth;
+  const FastDividerUint32 out_height = args.out_rows;
+  const FastDividerUint32 out_depth = args.out_depth;
 
   GPU_1D_KERNEL_LOOP(thread_id, num_outputs) {
     // Compute the indexes of this thread in the output.
@@ -669,7 +673,7 @@ Status LaunchDepthwiseConv2dGPUSmall(OpKernelContext* ctx,
   TF_CHECK_OK(GpuLaunchKernel(kernel, config.block_count, block_dim,
                               shared_memory_size, device.stream(), args, input,
                               filter, output));
-  return Status::OK();
+  return OkStatus();
 }
 
 // Returns whether the context's GPU supports efficient fp16 math.
@@ -758,7 +762,7 @@ Status LaunchDepthwiseConv2dGPU(OpKernelContext* ctx, const DepthwiseArgs& args,
                               std::min(max_block_count, config.block_count),
                               config.thread_per_block, 0, device.stream(), args,
                               input, filter, output, num_outputs));
-  return Status::OK();
+  return OkStatus();
 }
 
 template <typename T, int kKnownFilterWidth, int kKnownFilterHeight>
@@ -876,9 +880,9 @@ __global__ void __launch_bounds__(640, 2)
         const DepthwiseArgs args, const T* __restrict__ out_backprop,
         const T* __restrict__ filter, T* __restrict__ in_backprop,
         int num_in_backprop) {
-  const int in_height = args.in_rows;
-  const int in_width = args.in_cols;
-  const int in_depth = args.in_depth;
+  const FastDividerUint32 in_height = args.in_rows;
+  const FastDividerUint32 in_width = args.in_cols;
+  const FastDividerUint32 in_depth = args.in_depth;
   const int filter_height =
       kKnownFilterHeight < 0 ? args.filter_rows : kKnownFilterHeight;
   const int filter_width =
@@ -908,11 +912,11 @@ __global__ void __launch_bounds__(640, 2)
     const int out_row_start =
         tf_max<int>(0, (in_row - filter_height + pad_height + stride) / stride);
     const int out_row_end =
-        tf_min(out_height - 1, (in_row + pad_height) / stride);
+        tf_min<int>(out_height - 1, (in_row + pad_height) / stride);
     const int out_col_start =
-        tf_max(0, (in_col - filter_width + pad_width + stride) / stride);
+        tf_max<int>(0, (in_col - filter_width + pad_width + stride) / stride);
     const int out_col_end =
-        tf_min(out_width - 1, (in_col + pad_width) / stride);
+        tf_min<int>(out_width - 1, (in_col + pad_width) / stride);
 
     UNROLL for (int out_channel = out_channel_start;
                 out_channel < out_channel_end; ++out_channel) {
@@ -976,7 +980,7 @@ Status LaunchDepthwiseConv2dBackpropInputGPU(OpKernelContext* ctx,
   TF_CHECK_OK(GpuLaunchKernel(
       kernel, config.block_count, config.thread_per_block, 0, device.stream(),
       args, out_backprop, filter, in_backprop, num_in_backprop));
-  return Status::OK();
+  return OkStatus();
 }
 
 template <typename T, int kKnownFilterWidth, int kKnownFilterHeight>
@@ -1324,8 +1328,8 @@ __global__ void __launch_bounds__(512, 2)
   const int pad_width = args.pad_cols;
   const int out_depth = args.out_depth;
   const int out_height = args.out_rows;
-  const int out_width = args.out_cols;
-  const int depth_multiplier = args.depth_multiplier;
+  const FastDividerUint32 out_width = args.out_cols;
+  const FastDividerUint32 depth_multiplier = args.depth_multiplier;
   assert(gridDim.x == filter_width);
   assert(gridDim.z == out_depth);
 
@@ -1585,7 +1589,7 @@ Status TryLaunchDepthwiseConv2dBackpropFilterGPUSmall(
   TF_CHECK_OK(GpuLaunchKernel(kernel, config.block_count, block_dim,
                               shared_memory_size, device.stream(), args,
                               out_backprop, input, filter_backprop));
-  return Status::OK();
+  return OkStatus();
 }
 
 template <typename T, int kKnownFilterWidth, int kKnownFilterHeight,
@@ -1691,7 +1695,7 @@ Status LaunchDepthwiseConv2dBackpropFilterGPU(
                                    " is not supported");
   }
 
-  return Status::OK();
+  return OkStatus();
 }
 
 template <typename T, int kKnownFilterWidth, int kKnownFilterHeight>
@@ -1703,7 +1707,7 @@ Status LaunchDepthwiseConv2dBackpropFilterGPU(
                                                        kKnownFilterHeight>(
             ctx, args, out_backprop, input, filter_backprop, data_format)
             .ok()) {
-      return Status::OK();
+      return OkStatus();
     }
 
     return LaunchDepthwiseConv2dBackpropFilterGPU<T, kKnownFilterWidth,
@@ -1723,14 +1727,14 @@ void LaunchDepthwiseConvBackpropFilterOp<GpuDevice, T>::operator()(
     const T* input, T* filter_backprop, TensorFormat data_format) {
   auto stream = ctx->op_device_context()->stream();
 
-  // By disabling this exception, we can discover if other determinism
-  // exceptions are reached in the execution of a given model.
+  // It's simpler to catch this here than in
+  // DepthwiseConv2dNativeBackpropFilterOp
   OP_REQUIRES(
-      ctx,
-      !OpDeterminismRequired() || DisableDepthwiseConvDeterminismExceptions(),
+      ctx, !OpDeterminismRequired(),
       errors::Unimplemented(
           "A deterministic GPU implementation of DepthwiseConvBackpropFilter is"
-          " not currently available."));
+          " not available with this version of cuDNN. Please build with cuDNN"
+          " version 7.6.3 or later."));
 
   // Initialize the results to 0.
   int num_filter_backprop =

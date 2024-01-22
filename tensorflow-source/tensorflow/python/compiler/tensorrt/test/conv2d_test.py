@@ -17,7 +17,6 @@
 import numpy as np
 
 from tensorflow.python.compiler.tensorrt.test import tf_trt_integration_test_base as trt_test
-from tensorflow.python.compiler.tensorrt.test import test_utils as trt_test_utils
 from tensorflow.python.framework import constant_op
 from tensorflow.python.framework import dtypes
 from tensorflow.python.ops import array_ops
@@ -77,7 +76,6 @@ def build_graph(inp,
   return array_ops.identity(output, name="output_0")
 
 
-@trt_test_utils.disable_tf32_testing
 class Conv2DNCHWTest(trt_test.TfTrtIntegrationTestBase):
   """Testing conversion of Conv2D (data_format=NCHW) in TF-TRT conversion."""
 
@@ -113,7 +111,6 @@ class Conv2DNCHWTest(trt_test.TfTrtIntegrationTestBase):
     return super(Conv2DNCHWTest, self).ExpectedRelativeTolerance(run_params)
 
 
-@trt_test_utils.disable_tf32_testing
 class Conv2DNHWCTest(trt_test.TfTrtIntegrationTestBase):
   """Testing conversion of Conv2D (data_format=NCHW) in TF-TRT conversion."""
 
@@ -137,7 +134,6 @@ class Conv2DNHWCTest(trt_test.TfTrtIntegrationTestBase):
     return ["TRTEngineOp_000"]
 
 
-@trt_test_utils.disable_tf32_testing
 class Conv2DStridedNCHWTest(trt_test.TfTrtIntegrationTestBase):
   """Testing conversion of strided Conv2D (data_format=NCHW)."""
 
@@ -177,7 +173,6 @@ class Conv2DStridedNCHWTest(trt_test.TfTrtIntegrationTestBase):
     return 5.e-00 if run_params.precision_mode == "INT8" else 1.e-02
 
 
-@trt_test_utils.disable_tf32_testing
 class Conv2DTranposeTest(trt_test.TfTrtIntegrationTestBase):
   """Testing conversion of conv2d_transpose (AKA Conv2DBackpropInput)"""
 

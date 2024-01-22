@@ -3,17 +3,14 @@
 #   and provide TensorRT operators and converter package.
 #   APIs are meant to change over time.
 
-# buildifier: disable=same-origin-load
-load("//tensorflow:tensorflow.bzl", "cuda_py_test")
+load("//tensorflow:tensorflow.default.bzl", "cuda_py_test")
 
-# cuda_py_test enable XLA tests by default. We can't
+# cuda_py_test and cuda_py_tests enable XLA tests by default. We can't
 # combine XLA with TensorRT currently and should set
 # xla_enable_strict_auto_jit to False to disable XLA tests.
 
-# Loading TFTRT_PY_TEST_TAGS - Common set of tags used accross TF-TRT modules & tests
-load("//tensorflow/python/compiler/tensorrt:tensorrt.bzl", "TFTRT_PY_TEST_TAGS")
-
 package(
+    # copybara:uncomment default_applicable_licenses = ["//tensorflow:license"],
     default_visibility = ["//visibility:public"],
     licenses = ["notice"],
 )
@@ -46,11 +43,11 @@ py_library(
         "//tensorflow/python:convert_to_constants",
         "//tensorflow/python:func_graph",
         "//tensorflow/python:graph_util",
-        "//tensorflow/python:platform",
         "//tensorflow/python:session",
         "//tensorflow/python:tf_optimizer",
         "//tensorflow/python/eager:context",
         "//tensorflow/python/eager:function",
+        "//tensorflow/python/platform:tf_logging",
         "//tensorflow/python/saved_model:builder",
         "//tensorflow/python/saved_model:load",
         "//tensorflow/python/saved_model:loader",
@@ -85,7 +82,11 @@ cuda_py_test(
         "//tensorflow/python/compiler/tensorrt/test:trt_convert_test_data",
     ],
     python_version = "PY3",
-    tags = ["no_pip"] + TFTRT_PY_TEST_TAGS,
+    tags = [
+        "no_cuda_on_cpu_tap",
+        "no_pip",
+        "nomac",
+    ],
     xla_enable_strict_auto_jit = False,
     deps = [
         ":trt_convert_py",
@@ -104,5 +105,30 @@ cuda_py_test(
         "//tensorflow/python/tools:freeze_graph_lib",
         "//tensorflow/python/tools:saved_model_utils",
         "@absl_py//absl/testing:parameterized",
+    ],
+)
+
+cuda_py_test(
+    name = "quantization_mnist_test",
+    srcs = ["//tensorflow/python/compiler/tensorrt/test:quantization_mnist_test_srcs"],
+    data = [
+        "//tensorflow/python/compiler/tensorrt/test:quantization_mnist_test_data",
+    ],
+    python_version = "PY3",
+    tags = [
+        "no_cuda_on_cpu_tap",
+        "no_oss",  # TODO(b/125290478): allow running in at least some OSS configurations.
+        "no_pip",
+        "no_rocm",
+        "no_windows",
+        "nomac",
+        "requires-net:external",
+    ],
+    xla_enable_strict_auto_jit = False,
+    deps = [
+        ":tf_trt_integration_test_base",
+        "//tensorflow/python:client_testlib",
+        "//tensorflow/python:framework_test_lib",
+        "//tensorflow/python/estimator",
     ],
 )

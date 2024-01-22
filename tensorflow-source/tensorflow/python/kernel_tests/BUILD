@@ -1,12 +1,9 @@
 # Tests of TensorFlow kernels written using the Python API.
 
-load("//tensorflow:tensorflow.bzl", "cuda_py_test")
-
-# buildifier: disable=same-origin-load
-load("//tensorflow:tensorflow.bzl", "tf_py_test")
+load("//tensorflow:tensorflow.default.bzl", "cuda_py_test", "tf_py_test")
 
 package(
-    default_visibility = ["//tensorflow:internal"],
+    # copybara:uncomment default_applicable_licenses = ["//tensorflow:license"],
     licenses = ["notice"],
 )
 
@@ -24,8 +21,8 @@ cuda_py_test(
         "//tensorflow/python:client",
         "//tensorflow/python:client_testlib",
         "//tensorflow/python:framework_for_generated_wrappers",
-        "//tensorflow/python:platform",
         "//tensorflow/python:platform_benchmark",
+        "//tensorflow/python/platform:gfile",
     ],
     xla_enable_strict_auto_jit = True,
 )
@@ -56,10 +53,7 @@ tf_py_test(
     size = "medium",
     srcs = ["collective_ops_multi_worker_test.py"],
     python_version = "PY3",
-    tags = [
-        "no_rocm",
-        "notsan",  # TODO(b/171435192)
-    ],
+    tags = ["no_rocm"],
     deps = [
         "//tensorflow/python:collective_ops",
         "//tensorflow/python:constant_op",
@@ -74,10 +68,12 @@ tf_py_test(
     ],
 )
 
+# b/234468872
 cuda_py_test(
     name = "collective_ops_test",
     size = "medium",
     srcs = ["collective_ops_test.py"],
+    shard_count = 4,
     tags = [
         "multi_and_single_gpu",
         "no_tfrt",  # TODO(b/185944042)
@@ -109,6 +105,7 @@ tf_py_test(
         "//tensorflow/python:composite_tensor_ops",
         "//tensorflow/python:framework",
         "//tensorflow/python:framework_for_generated_wrappers",
+        "//tensorflow/python/platform:test",
     ],
 )
 
@@ -116,12 +113,11 @@ cuda_py_test(
     name = "critical_section_test",
     size = "medium",
     srcs = ["critical_section_test.py"],
-    tags = [
-        "notsan",  # TODO(b/180454366): Re-enable.
-    ],
     deps = [
         "//tensorflow/python:array_ops",
         "//tensorflow/python:client_testlib",
+        "//tensorflow/python:cond",
+        "//tensorflow/python:control_flow_assert",
         "//tensorflow/python:control_flow_ops",
         "//tensorflow/python:control_flow_v2_toggles",
         "//tensorflow/python:critical_section_ops",
@@ -131,9 +127,11 @@ cuda_py_test(
         "//tensorflow/python:platform_test",
         "//tensorflow/python:resource_variable_ops",
         "//tensorflow/python:tensor_array_ops",
+        "//tensorflow/python:while_loop",
         "//tensorflow/python/data/experimental/ops:prefetching_ops",
         "//tensorflow/python/data/ops:dataset_ops",
         "//tensorflow/python/eager:context",
+        "//tensorflow/python/platform:tf_logging",
         "@absl_py//absl/testing:parameterized",
     ],
 )
@@ -178,6 +176,7 @@ tf_py_test(
         "//tensorflow/python:framework_for_generated_wrappers",
         "//tensorflow/python:framework_test_lib",
         "//tensorflow/python:logging_ops",
+        "//tensorflow/python/platform:tf_logging",
     ],
 )
 
@@ -187,6 +186,7 @@ cuda_py_test(
     srcs = ["logging_ops_test.py"],
     deps = [
         "//tensorflow/python:client_testlib",
+        "//tensorflow/python:control_flow_assert",
         "//tensorflow/python:control_flow_ops",
         "//tensorflow/python:framework_for_generated_wrappers",
         "//tensorflow/python:framework_test_lib",
@@ -225,10 +225,12 @@ cuda_py_test(
     deps = [
         "//tensorflow/python:array_ops",
         "//tensorflow/python:client_testlib",
+        "//tensorflow/python:cond",
         "//tensorflow/python:control_flow_ops",
         "//tensorflow/python:framework_for_generated_wrappers",
         "//tensorflow/python:math_ops",
         "//tensorflow/python:numerics",
+        "//tensorflow/python:while_loop",
         "//third_party/py/numpy",
     ],
 )
@@ -259,6 +261,23 @@ cuda_py_test(
     deps = [
         "//tensorflow/python:client_testlib",
         "//tensorflow/python:math_ops",
+        "//third_party/py/numpy",
+    ],
+)
+
+cuda_py_test(
+    name = "histogram_ops_test",
+    size = "small",
+    srcs = ["histogram_ops_test.py"],
+    python_version = "PY3",
+    deps = [
+        "//tensorflow/python:array_ops",
+        "//tensorflow/python:client_testlib",
+        "//tensorflow/python:histogram_ops",
+        "//tensorflow/python/framework:constant_op",
+        "//tensorflow/python/framework:errors",
+        "//tensorflow/python/framework:for_generated_wrappers",
+        "//tensorflow/python/framework:test_lib",
         "//third_party/py/numpy",
     ],
 )

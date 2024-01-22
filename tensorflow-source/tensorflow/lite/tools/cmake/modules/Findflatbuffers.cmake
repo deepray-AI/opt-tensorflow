@@ -19,6 +19,7 @@ include(flatbuffers)
 if(flatbuffers_POPULATED)
   set(FLATBUFFERS_FOUND TRUE)
   get_target_property(FLATBUFFERS_INCLUDE_DIRS flatbuffers INCLUDE_DIRECTORIES)
+  add_library(flatbuffers::flatbuffers ALIAS flatbuffers)
   set(FLATBUFFERS_LIBRARIES flatbuffers)
   set(FLATBUFFERS_PROJECT_DIR "${flatbuffers_SOURCE_DIR}" CACHE STRING
     "Flatbuffers project dir"

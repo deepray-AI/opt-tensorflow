@@ -1,3 +1,18 @@
+/* Copyright 2022 The TensorFlow Authors. All Rights Reserved.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+==============================================================================*/
+
 #if GOOGLE_CUDA && GOOGLE_TENSORRT
 
 #include "tensorflow/compiler/tf2tensorrt/convert/convert_nodes.h"
@@ -10,12 +25,8 @@ namespace convert {
 
 class ConvertLogSoftmax : public OpConverterBase<ConvertLogSoftmax> {
  public:
-  explicit ConvertLogSoftmax(OpConverterParams *params)
+  explicit ConvertLogSoftmax(const OpConverterParams *params)
       : OpConverterBase<ConvertLogSoftmax>(params) {}
-
-  static constexpr std::array<DataType, 3> AllowedDataTypes() {
-    return {DataType::DT_FLOAT, DataType::DT_HALF};
-  }
 
   static constexpr std::array<InputArgSpec, 1> InputSpec() {
     return std::array<InputArgSpec, 1>{
@@ -25,7 +36,6 @@ class ConvertLogSoftmax : public OpConverterBase<ConvertLogSoftmax> {
   Status Validate() {
     const auto &params = *this->params_;
     const auto &inputs = params.inputs;
-    const auto &node_def = params.node_def;
 
     ITensorProxyPtr logits_tensor = inputs.at(0).tensor();
 
@@ -35,7 +45,7 @@ class ConvertLogSoftmax : public OpConverterBase<ConvertLogSoftmax> {
           "TensorRT LogSoftmax cannot apply on the batch dimension");
     }
 
-    return Status::OK();
+    return OkStatus();
   }
 
   Status Convert() {
@@ -81,7 +91,7 @@ class ConvertLogSoftmax : public OpConverterBase<ConvertLogSoftmax> {
     params.converter->SetLayerName(sub, node_def, "sub");
 
     params.outputs->push_back(TRT_TensorOrWeights(sub->getOutput(0)));
-    return Status::OK();
+    return OkStatus();
   }
 };
 

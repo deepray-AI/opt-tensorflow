@@ -166,6 +166,13 @@ class EagerOperation : public ImmediateExecutionOperation {
 
   void UpdateInput(int i, TensorHandle* h);
 
+  // This is useful if we want the EagerOperation to point to a different
+  // function.
+  void UpdateName(const string& name) {
+    op_name_ = name.c_str();
+    attrs_.set_op_name(name);
+  }
+
   // Like TensorHandles, EagerOperations may be placed either on a virtual
   // CustomDevice or on a physical Device.
   VariantDevice Device() const { return device_; }
@@ -197,7 +204,8 @@ class EagerOperation : public ImmediateExecutionOperation {
       if (eager_func_params_.has_value()) {
         eager_func_params_->step_id = step_id;
       } else {
-        eager_func_params_ = EagerFunctionParams{kInvalidOpId, step_id};
+        eager_func_params_ = EagerFunctionParams{
+            kInvalidOpId, /*is_component_function=*/false, step_id};
       }
     } else {
       LOG(WARNING) << "SetStepId() should not receive a gloabl rendezvous id.";

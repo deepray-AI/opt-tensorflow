@@ -14,8 +14,8 @@ limitations under the License.
 ==============================================================================*/
 
 #include "tensorflow/compiler/xla/service/gpu/tests/mlir_gpu_test_base.h"
-#include "tensorflow/core/lib/core/status_test_util.h"
-#include "tensorflow/core/platform/test.h"
+#include "tensorflow/tsl/lib/core/status_test_util.h"
+#include "tensorflow/tsl/platform/test.h"
 
 namespace xla {
 namespace gpu {
@@ -32,7 +32,7 @@ TEST_F(CompileTest, InvalidCollectivePermuteOp) {
       })";
   auto executable = CompileMlirText(mlir_text);
   ASSERT_FALSE(executable.ok());
-  EXPECT_THAT(executable.status().error_message().c_str(),
+  EXPECT_THAT(executable.status().message(),
               ::testing::HasSubstr("expect source_target_pairs attribute of "
                                    "shape (N, 2), but got (1, 3)"));
 }

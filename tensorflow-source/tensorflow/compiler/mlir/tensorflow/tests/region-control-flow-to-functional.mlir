@@ -304,6 +304,32 @@ func.func @testToBoolFold(%arg0: tensor<i32>, %arg1: tensor<*xf32>) -> tensor<*x
 
 // -----
 
+func.func private @branch_0(tensor<!tf_type.resource>) -> tensor<*xf32>
+func.func private @branch_1(tensor<!tf_type.resource>) -> tensor<*xf32>
+
+// CHECK: func private @tf.CaseRegion_branch1{{.*}}
+// CHECK: call @branch_1
+// CHECK: func private @tf.CaseRegion_branch0{{.*}}
+// CHECK: call @branch_0
+// CHECK-LABEL: func @testCase
+func.func @testCase(%arg0: tensor<i32>, %arg1: tensor<!tf_type.resource<tensor<1x2x3xf32>>>) -> tensor<1x2x3xf32> {
+  // CHECK: [[Result:%.*]] = "tf.Case"(%arg0, %arg1)
+  // CHECK-SAME: branches = [@tf.CaseRegion_branch0{{.*}}, @tf.CaseRegion_branch1{{.*}}]
+  // CHECK-SAME: is_stateless = false
+  %0 = "tf.CaseRegion"(%arg0) ({
+    %1 = "tf.Cast"(%arg1) {Truncate = false} : (tensor<!tf_type.resource<tensor<1x2x3xf32>>>) -> tensor<!tf_type.resource>
+    %2 = func.call @branch_0(%1) : (tensor<!tf_type.resource>) -> tensor<*xf32>
+    "tf.Yield"(%2) : (tensor<*xf32>) -> ()
+  }, {
+    %1 = "tf.Cast"(%arg1) {Truncate = false} : (tensor<!tf_type.resource<tensor<1x2x3xf32>>>) -> tensor<!tf_type.resource>
+    %2 = func.call @branch_1(%1) : (tensor<!tf_type.resource>) -> tensor<*xf32>
+    "tf.Yield"(%2) : (tensor<*xf32>) -> ()
+  }) {is_stateless = false} : (tensor<i32>) -> tensor<1x2x3xf32>
+  return %0 : tensor<1x2x3xf32>
+}
+
+// -----
+
 // Simple WhileRegion
 // CHECK: func private @tf.WhileRegion_body{{.+}}
 // CHECK: "tf.Add"
@@ -791,3 +817,42 @@ func.func @testOverrideIfRegionXlaPropageCompileTimeConsts(%arg0: tensor<i1>, %a
     }) {is_stateless = true, _attr0 = false, attr1 = "hello", _then_func_name = "test_then_name", _else_func_name = "test_else_name", _xla_propagate_compile_time_consts = false} :  (tensor<i1>) -> tensor<*xf32>
   func.return %0 : tensor<*xf32>
 }
+
+// -----
+
+// Trivial WhileRegion_cond
+// CHECK: func private @tf.WhileRegion_body{{.+}}
+// CHECK: "tf.Add"
+// CHECK: constant dense<1>
+// CHECK: "tf.Sub"
+// CHECK:func private @tf.WhileRegion_cond{{.+}}
+// CHECK: "tf.ToBool"
+// CHECK-LABEL: testValidWhileRegion
+func.func @testValidWhileRegion(%arg0 : tensor<*xf32>, %arg1 : tensor<i32>) -> tensor<*xf32> {
+  // CHECK: [[Result:%.*]]:2 = "tf.While"(%arg0, %arg1)
+  // CHECK-SAME: _attr0 = false
+  // CHECK-SAME: _xla_propagate_compile_time_consts = true
+  // CHECK-NOT: attr1
+  // CHECK-SAME: body = @tf.WhileRegion_body
+  // CHECK-SAME: cond = @tf.WhileRegion_cond
+  %0:2 = "tf.WhileRegion"(%arg0, %arg1) (
+    {
+      // condition, check if count has reached 0
+      ^bb0(%carg0: tensor<*xf32>, %carg1: tensor<i32>):
+      %cond = "tf.ToBool"(%carg1) : (tensor<i32>) -> tensor<i1>
+      "tf.Yield"(%cond) : (tensor<i1>) -> ()
+    },
+    {
+      // loop body
+      ^bb0(%barg0: tensor<*xf32>, %barg1: tensor<i32>):
+      %add = "tf.Add"(%barg0, %barg0) : (tensor<*xf32>, tensor<*xf32>) -> tensor<*xf32>
+      %one = arith.constant dense<1> : tensor<i32>
+      %sub = "tf.Sub"(%barg1, %one) : (tensor<i32>, tensor<i32>) -> tensor<i32>
+      "tf.Yield"(%add, %sub) : (tensor<*xf32>, tensor<i32>) -> ()
+    }
+  ) { is_stateless = false, _attr0 = false, attr1 = "hello"} : (tensor<*xf32>, tensor<i32>) -> (tensor<*xf32>, tensor<i32>)
+  // CHECK: return [[Result]]#0
+  func.return %0#0 : tensor<*xf32>
+}
+
+// -----

@@ -17,16 +17,18 @@ limitations under the License.
 #include <sys/mman.h>
 
 #include <algorithm>
+#include <functional>
 #include <initializer_list>
+#include <memory>
 
 #include <gtest/gtest.h>
-#include "tensorflow/lite/c/common.h"
 #include "tensorflow/lite/context_util.h"
+#include "tensorflow/lite/core/c/common.h"
+#include "tensorflow/lite/core/model.h"
 #include "tensorflow/lite/delegates/nnapi/nnapi_delegate_kernel.h"
 #include "tensorflow/lite/delegates/nnapi/nnapi_delegate_plugin.h"
 #include "tensorflow/lite/interpreter.h"
 #include "tensorflow/lite/kernels/test_util.h"
-#include "tensorflow/lite/model.h"
 #include "tensorflow/lite/nnapi/NeuralNetworksTypes.h"
 #include "tensorflow/lite/nnapi/nnapi_implementation.h"
 
@@ -81,7 +83,7 @@ class SingleOpModelWithNNAPI : public SingleOpModel {
   }
 
   void ApplyNNAPIDelegate() {
-    stateful_delegate_.reset(new StatefulNnApiDelegate(options_));
+    stateful_delegate_ = std::make_unique<StatefulNnApiDelegate>(options_);
     SetDelegate(stateful_delegate_.get());
     ApplyDelegate();
   }
@@ -193,7 +195,7 @@ TEST(NNAPIDelegate, AddWithNoActivation) {
                     {TensorType_FLOAT32, {}}, ActivationFunctionType_NONE);
   m.PopulateTensor<float>(m.input1(), {-2.0, 0.2, 0.7, 0.8});
   m.PopulateTensor<float>(m.input2(), {0.1, 0.2, 0.3, 0.5});
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.GetOutput(), ElementsAreArray({-1.9, 0.4, 1.0, 1.3}));
 }
 
@@ -204,7 +206,7 @@ TEST(NNAPIDelegate, AddScalarWithNoActivation) {
                     ActivationFunctionType_NONE);
   m.PopulateTensor<float>(m.input1(), {-2.0, 0.2, 0.7, 0.7});
   m.PopulateTensor<float>(m.input2(), {0.1});
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.GetOutput(), ElementsAreArray({-1.9, 0.3, 0.8, 0.8}));
 }
 
@@ -217,7 +219,7 @@ TEST(NNAPIDelegate, AddWithNoActivationRelaxed) {
       {TensorType_FLOAT32, {}}, ActivationFunctionType_NONE, true);
   m.PopulateTensor<float>(m.input1(), {-2.0, -1.0, 1.0, 2.0});
   m.PopulateTensor<float>(m.input2(), {1.0, 2.0, 3.0, 4.0});
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.GetOutput(), ElementsAreArray({-1.0, 1.0, 4.0, 6.0}));
 }
 
@@ -228,7 +230,7 @@ TEST(NNAPIDelegate, AddWithRelu) {
                     {TensorType_FLOAT32, {}}, ActivationFunctionType_RELU);
   m.PopulateTensor<float>(m.input1(), {-2.0, 0.2, 0.7, 0.8});
   m.PopulateTensor<float>(m.input2(), {0.1, 0.2, 0.3, 0.5});
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.GetOutput(), ElementsAreArray({0.0, 0.4, 1.0, 1.3}));
 }
 
@@ -243,7 +245,7 @@ TEST(NNAPIDelegate, ResizeInputTensorsWorks) {
   EXPECT_EQ(m.AllocateTensors(), kTfLiteOk);
   m.PopulateTensor<float>(m.input1(), {-2.0, 0.2, 0.7, 0.8, 0.9, 0.7});
   m.PopulateTensor<float>(m.input2(), {0.1, 0.2, 0.3, 0.5, 0.2, 0.8});
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.GetOutput(), ElementsAreArray({-1.9, 0.4, 1.0, 1.3, 1.1, 1.5}));
 
   EXPECT_EQ(m.ResizeInputTensor(m.input1(), {1, 2, 2, 1}), kTfLiteOk);
@@ -251,7 +253,7 @@ TEST(NNAPIDelegate, ResizeInputTensorsWorks) {
   EXPECT_EQ(m.AllocateTensors(), kTfLiteOk);
   m.PopulateTensor<float>(m.input1(), {0.7, 0.8, 0.9, 0.7});
   m.PopulateTensor<float>(m.input2(), {0.3, 0.5, 0.2, 0.8});
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.GetOutput(), ElementsAreArray({1.0, 1.3, 1.1, 1.5}));
 }
 
@@ -297,7 +299,7 @@ TEST(NNAPIDelegate, ResizeDynamicBatchInputTensorsWorks) {
     EXPECT_EQ(m.AllocateTensors(), kTfLiteOk);
     m.PopulateTensor<float>(m.input1(), {-2.0, 0.2, 0.7, 0.8, 0.9, 0.7});
     m.PopulateTensor<float>(m.input2(), {0.1, 0.2, 0.3, 0.5, 0.2, 0.8});
-    ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+    ASSERT_EQ(m.Invoke(), kTfLiteOk);
     EXPECT_THAT(m.GetOutput(),
                 ElementsAreArray({-1.9, 0.4, 1.0, 1.3, 1.1, 1.5}));
   };
@@ -307,7 +309,7 @@ TEST(NNAPIDelegate, ResizeDynamicBatchInputTensorsWorks) {
     EXPECT_EQ(m.AllocateTensors(), kTfLiteOk);
     m.PopulateTensor<float>(m.input1(), {0.7, 0.8, 0.9, 0.7});
     m.PopulateTensor<float>(m.input2(), {0.3, 0.5, 0.2, 0.8});
-    ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+    ASSERT_EQ(m.Invoke(), kTfLiteOk);
     EXPECT_THAT(m.GetOutput(), ElementsAreArray({1.0, 1.3, 1.1, 1.5}));
   };
 
@@ -334,7 +336,7 @@ TEST(NNAPIDelegate, StatefulDelegate) {
                     {TensorType_FLOAT32, {}}, ActivationFunctionType_NONE);
   m.PopulateTensor<float>(m.input1(), {-2.0, 0.2, 0.7, 0.8});
   m.PopulateTensor<float>(m.input2(), {0.1, 0.2, 0.3, 0.5});
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.GetOutput(), ElementsAreArray({-1.9, 0.4, 1.0, 1.3}));
 }
 
@@ -351,7 +353,7 @@ TEST(NNAPIDelegate, StatefulDelegateWithAcceleratorName) {
                     {TensorType_FLOAT32, {}}, ActivationFunctionType_NONE);
   m.PopulateTensor<float>(m.input1(), {-2.0, 0.2, 0.7, 0.8});
   m.PopulateTensor<float>(m.input2(), {0.1, 0.2, 0.3, 0.5});
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.GetOutput(), ElementsAreArray({-1.9, 0.4, 1.0, 1.3}));
 }
 
@@ -377,7 +379,7 @@ TEST(NNAPIDelegate, StatefulDelegateWithInvalidAcceleratorName) {
   // Execution should fall back to the default CPU path.
   m.PopulateTensor<float>(m.input1(), {-2.0, 0.2, 0.7, 0.8});
   m.PopulateTensor<float>(m.input2(), {0.1, 0.2, 0.3, 0.5});
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.GetOutput(), ElementsAreArray({-1.9, 0.4, 1.0, 1.3}));
 }
 
@@ -395,7 +397,7 @@ TEST(NNAPIDelegate, StatefulDelegateWithCompilationCaching) {
                     {TensorType_FLOAT32, {}}, ActivationFunctionType_NONE);
   m.PopulateTensor<float>(m.input1(), {-2.0, 0.2, 0.7, 0.8});
   m.PopulateTensor<float>(m.input2(), {0.1, 0.2, 0.3, 0.5});
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.GetOutput(), ElementsAreArray({-1.9, 0.4, 1.0, 1.3}));
 }
 
@@ -413,12 +415,12 @@ TEST(NNAPIDelegate, StatefulDelegateWithQoS) {
                     {TensorType_FLOAT32, {}}, ActivationFunctionType_NONE);
   m.PopulateTensor<float>(m.input1(), {-2.0, 0.2, 0.7, 0.8});
   m.PopulateTensor<float>(m.input2(), {0.1, 0.2, 0.3, 0.5});
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.GetOutput(), ElementsAreArray({-1.9, 0.4, 1.0, 1.3}));
 }
 
 // Sanity check for the state-ful NNAPI delegate using TfLiteBufferHandle.
-TEST(NNAPIDelegate, StatefulDelegateWithBufferHandles) {
+TEST(NNAPIDelegate, DISABLED_StatefulDelegateWithBufferHandles) {
   // Skip the test if Android specific functions could not be found.
   if (!NnApiImplementation()->ASharedMemory_create ||
       !NnApiImplementation()->ANeuralNetworksMemory_createFromFd) {
@@ -477,7 +479,7 @@ TEST(NNAPIDelegate, StatefulDelegateWithBufferHandles) {
   m.SetBufferHandle(m.input1(), input1_handle);
   m.MarkInputTensorDataStale(m.input1());
   m.PopulateTensor<float>(m.input2(), {0.1, 0.2, 0.3, 0.5});
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.GetOutput(), ElementsAreArray({-1.9, 0.4, 1.0, 1.3}));
 
   // Run the inference multiple times with the same buffer so that the execution
@@ -487,7 +489,7 @@ TEST(NNAPIDelegate, StatefulDelegateWithBufferHandles) {
     input1_data[0] = -2.0 + i;
     memcpy(input1_memory_data, input1_data, kInput1ByteSize);
     m.MarkInputTensorDataStale(m.input1());
-    ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+    ASSERT_EQ(m.Invoke(), kTfLiteOk);
     EXPECT_THAT(m.GetOutput(), ElementsAreArray({-1.9 + i, 0.4, 1.0, 1.3}));
   }
 
@@ -502,7 +504,7 @@ TEST(NNAPIDelegate, StatefulDelegateWithBufferHandles) {
     m.SetBufferHandle(m.input1(), input1_handle);
     m.MarkInputTensorDataStale(m.input1());
     m.PopulateTensor<float>(m.input2(), {0.1, 0.2, 0.3, 0.5});
-    ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+    ASSERT_EQ(m.Invoke(), kTfLiteOk);
     EXPECT_THAT(m.GetOutput(), ElementsAreArray({-1.9 + i, 0.4, 1.0, 1.3}));
   }
 }
@@ -537,7 +539,7 @@ TEST(NNAPIDelegate, MulWithNoActivation) {
                     {TensorType_FLOAT32, {}}, ActivationFunctionType_NONE);
   m.PopulateTensor<float>(m.input1(), {-2.0, 0.2, 0.7, 0.8});
   m.PopulateTensor<float>(m.input2(), {0.1, 0.2, 0.3, 0.5});
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.GetOutput(),
               ElementsAreArray(ArrayFloatNear({-0.2, 0.04, 0.21, 0.4})));
 }
@@ -579,7 +581,7 @@ TEST(NNAPIDelegate, AveragePoolWithNoActivation) {
       0, 6, 2, 4,   //
       3, 2, 10, 7,  //
   });
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.GetOutput(), ElementsAreArray({2.75, 5.75}));
 }
 
@@ -592,7 +594,7 @@ TEST(NNAPIDelegate, MaxPoolWithNoActivation) {
       0, 6, 2, 4,   //
       3, 2, 10, 7,  //
   });
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.GetOutput(), ElementsAreArray({6, 10}));
 }
 
@@ -605,7 +607,7 @@ TEST(NNAPIDelegate, L2PoolWithNoActivation) {
       0, 6, 2, 4,   //
       3, 2, 10, 7,  //
   });
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.GetOutput(), ElementsAreArray({3.5, 6.5}));
 }
 
@@ -707,7 +709,7 @@ TEST(ConvolutionOpTest, SimpleTestQuantized) {
   });
   m.SetBias({1, 2, 3});
 
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
 
   EXPECT_THAT(m.GetOutput(), ElementsAreArray(ArrayFloatNear(
                                  {
@@ -744,7 +746,7 @@ TEST(ConvolutionOpTest, SimpleTestQuantizedGrouped) {
   });
   m.SetBias({1, 2});
 
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
 
   EXPECT_THAT(m.GetOutput(), ElementsAreArray(ArrayFloatNear(
                                  {
@@ -778,7 +780,7 @@ TEST(ConvolutionOpTest, FloatInputQuantizedWeights) {
   });
   m.SetBias({1, 2, 3});
 
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
 
   EXPECT_THAT(m.GetOutput(), ElementsAreArray(ArrayFloatNear(
                                  {
@@ -810,7 +812,7 @@ TEST(ConvolutionOpTest, NoActivation) {
   });
   m.SetBias({1, 2, 3});
 
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
 
   EXPECT_THAT(m.GetOutput(), ElementsAreArray({
                                  18, 2, 5,  // first batch, left
@@ -846,12 +848,12 @@ TEST(ConvolutionOpTest, SimpleTestQuantizedOutputMultiplierGreaterThan1) {
   quant_op.SetInput(input);
   quant_op.SetFilter(filter);
   quant_op.SetBias(bias);
-  ASSERT_EQ(quant_op.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(quant_op.Invoke(), kTfLiteOk);
 
   float_op.SetInput(input);
   float_op.SetFilter(filter);
   float_op.SetBias(bias);
-  ASSERT_EQ(float_op.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(float_op.Invoke(), kTfLiteOk);
 
   EXPECT_THAT(quant_op.GetOutput(),
               ElementsAreArray(ArrayFloatNear(float_op.GetOutput(), 1)));
@@ -905,7 +907,7 @@ TEST(ConvolutionOpTest, SimpleTestFloatWithDilation) {
   m.SetFilter({1, 2, 3, 4, 5, 6, 7, 8, 9});
   // Zero bias for this test.
   m.SetBias({0});
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
 
   // Since the dilation rate is 3 this will reduce the size of the output from
   // 10x10 to 3x3 of all 5s. Specifically:
@@ -990,7 +992,7 @@ TEST(ConvolutionOpTest, SimpleTestQuantizedWithDilation) {
   m.SetFilter({1, 2, 3, 4, 5, 6, 7, 8, 9});
   // Zero bias for this test.
   m.SetBias({0});
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
 
   // Since the dilation rate is 3 this will reduce the size of the output from
   // 10x10 to 3x3 of all 5s. Specifically:
@@ -1104,7 +1106,7 @@ TEST(ConvolutionOpTest, SimplePerChannelTest) {
 
   // Invoke and verify output.
   // output has dimension [1 * 1 * 2 * 2] as [batch, y, x, output_channel]
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.GetOutput(),
               testing::Pointwise(QuantizedNear(), {61, 127, -115, -93}));
 }
@@ -1196,7 +1198,7 @@ TEST(NNAPIDelegate, DepthwiseConv2DWithNoActivation) {
   });
   m.SetBias({1, 2, 3, 4});
 
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
 
   EXPECT_THAT(m.GetOutput(), ElementsAreArray({
                                  71, -34, 99, -20,  //
@@ -1229,12 +1231,12 @@ TEST(QuantizedDepthwiseConv2DTest, FilterMultiplierGreaterThan1) {
   quant_op.SetInput(input);
   quant_op.SetFilter(filter);
   quant_op.SetBias(bias);
-  ASSERT_EQ(quant_op.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(quant_op.Invoke(), kTfLiteOk);
 
   float_op.SetInput(input);
   float_op.SetFilter(filter);
   float_op.SetBias(bias);
-  ASSERT_EQ(float_op.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(float_op.Invoke(), kTfLiteOk);
 
   EXPECT_THAT(quant_op.GetOutput(),
               ElementsAreArray(ArrayFloatNear(float_op.GetOutput(), 1)));
@@ -1320,7 +1322,7 @@ TEST(FullyConnectedOpTest, SimpleTest) {
       1, 2, 3, 4, 5, 6, 7, -8, 9,  -10,  // b = 1
   });
 
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
 
   EXPECT_THAT(m.GetOutput(), ElementsAre(24, 25, 26, 58, 59, 60));
 }
@@ -1341,7 +1343,7 @@ TEST(FullyConnectedOpTest, FloatInputQuantizedWeights) {
       1, 2, 3, 4, 5, 6, 7, -8, 9,  -10,  // b = 1
   });
 
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
 
   EXPECT_THAT(m.GetOutput(),
               ElementsAreArray(ArrayFloatNear({24, 25, 26, 58, 59, 60}, 1.3)));
@@ -1366,7 +1368,7 @@ TEST(FullyConnectedOpTest, QuantizedOutputMultiplierGreaterThan1) {
       1, 2, 3, 4, 5, 6, 7, -8, 9,  -10,  // b = 1
   });
 
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
 
   EXPECT_THAT(m.GetOutput(), ElementsAreArray(ArrayFloatNear({
                                  24, 25, 26,  // first batch
@@ -1406,7 +1408,7 @@ TEST(SoftmaxOpTest, SimpleTest) {
       -1.0, -2.0, -3.0, -4.0, -5.0,  // b = 1
   });
 
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
 
   EXPECT_THAT(
       m.GetOutput(),
@@ -1422,7 +1424,7 @@ TEST(SoftmaxOpTest, Beta2) {
       1.0, 2.0, 3.0, 4.0, 5.0,  // b = 0
   });
 
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
 
   EXPECT_THAT(
       m.GetOutput(),
@@ -1440,7 +1442,7 @@ TEST(SoftmaxOpTest, 3dInput) {
       -5.0, -1.0, -2.0, -3.0, -4.0,  // b = 1
   });
 
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
 
   EXPECT_THAT(
       m.GetOutput(),
@@ -1461,7 +1463,7 @@ TEST(SoftmaxOpTest, 4dInput) {
       -5.0, -1.0, -2.0, -3.0, -4.0,  // b = 1
   });
 
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
 
   EXPECT_THAT(
       m.GetOutput(),
@@ -1504,7 +1506,7 @@ class ReshapeOpModel : public SingleOpModelWithNNAPI {
 TEST(NNAPIDelegate, ReshapeSimpleTest) {
   ReshapeOpModel m({1, 2, 4, 1}, {2, 2, 2});
   m.SetInput({1, 2, 3, 4, 5, 6, 7, 8});
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.GetOutput(), ElementsAreArray({1, 2, 3, 4, 5, 6, 7, 8}));
   EXPECT_THAT(m.GetOutputShape(), ElementsAreArray({2, 2, 2}));
 }
@@ -1542,7 +1544,7 @@ TEST(NNAPIDelegate, DISABLED_SqueezeSimpleTest) {
   SqueezeOpModel m({TensorType_FLOAT32, {1, 24, 1}}, {TensorType_FLOAT32, {24}},
                    {});
   m.SetInput(data);
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.GetOutputShape(), ElementsAreArray({24}));
   EXPECT_THAT(
       m.GetOutput(),
@@ -1558,7 +1560,7 @@ TEST(NNAPIDelegate, SqueezeWithAxisTest) {
   SqueezeOpModel m({TensorType_FLOAT32, {1, 24, 1}}, {TensorType_FLOAT32, {24}},
                    {2});
   m.SetInput(data);
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.GetOutputShape(), ElementsAreArray({1, 24}));
   EXPECT_THAT(
       m.GetOutput(),
@@ -1596,7 +1598,7 @@ TEST(NNAPIDelegate, L2NormSimpleTest) {
                   {TensorType_FLOAT32, {1, 1, 1, 6}},
                   ActivationFunctionType_NONE);
   m.SetInput(data);
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.GetOutputShape(), ElementsAreArray({1, 1, 1, 6}));
   EXPECT_THAT(m.GetOutput(),
               ElementsAreArray({-0.55, 0.3, 0.35, 0.6, -0.35, 0.05}));
@@ -1632,7 +1634,7 @@ TEST(NNAPIDelegate, TransposeSimpleTest) {
   TransposeSimpleModel m({2, 3, 4}, {3}, {2, 0, 1});
   m.SetInput({0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11,
               12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23});
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.GetOutputShape(), ElementsAreArray({4, 2, 3}));
   EXPECT_THAT(m.GetOutput(),
               ElementsAreArray({0, 4, 8,  12, 16, 20, 1, 5, 9,  13, 17, 21,
@@ -1666,7 +1668,7 @@ TEST(Elementwise, Abs) {
                                          0.f, -6.2f, 2.f, 4.f,  //
                                          3.f, -2.f, 10.f, 1.f,  //
                                      });
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.ExtractVector<float>(m.output()), ElementsAreArray({
                                                       0.f, 6.2f, 2.f, 4.f,  //
                                                       3.f, 2.f, 10.f, 1.f,  //
@@ -1677,7 +1679,7 @@ TEST(Elementwise, Abs) {
 TEST(Elementwise, Exp) {
   ElementwiseOpFloatModel m(BuiltinOperator_EXP, {3, 1, 2});
   m.PopulateTensor<float>(m.input(), {1.0, 0.0, -1.0, 1.0, 1.0, -1.0});
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.ExtractVector<float>(m.output()),
               ElementsAreArray(ArrayFloatNear(
                   {2.71828, 1, 0.367879, 2.71828, 2.71828, 0.367879})));
@@ -1687,7 +1689,7 @@ TEST(Elementwise, Exp) {
 TEST(Elementwise, Log) {
   ElementwiseOpFloatModel m(BuiltinOperator_LOG, {1, 1, 4, 1});
   m.PopulateTensor<float>(m.input(), {1, 3.1415926, 1, 1});
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.ExtractVector<float>(m.output()),
               ElementsAreArray(ArrayFloatNear({0, 1.14473, 0, 0})));
   EXPECT_THAT(m.GetTensorShape(m.output()), ElementsAreArray({1, 1, 4, 1}));
@@ -1696,7 +1698,7 @@ TEST(Elementwise, Log) {
 TEST(Elementwise, Rsqrt) {
   ElementwiseOpFloatModel m(BuiltinOperator_RSQRT, {1, 1, 4, 1});
   m.PopulateTensor<float>(m.input(), {1, 2, 4, 9});
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.ExtractVector<float>(m.output()),
               ElementsAreArray(ArrayFloatNear({1, 0.7071, 0.5, 0.33333})));
   EXPECT_THAT(m.GetTensorShape(m.output()), ElementsAreArray({1, 1, 4, 1}));
@@ -1705,7 +1707,7 @@ TEST(Elementwise, Rsqrt) {
 TEST(Elementwise, Sin) {
   ElementwiseOpFloatModel m(BuiltinOperator_SIN, {1, 1, 4, 1});
   m.PopulateTensor<float>(m.input(), {0, 3.1415926, -3.1415926, 1});
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.ExtractVector<float>(m.output()),
               ElementsAreArray(ArrayFloatNear({0, 0, 0, 0.84147})));
   EXPECT_THAT(m.GetTensorShape(m.output()), ElementsAreArray({1, 1, 4, 1}));
@@ -1714,7 +1716,7 @@ TEST(Elementwise, Sin) {
 TEST(Elementwise, Sqrt) {
   ElementwiseOpFloatModel m(BuiltinOperator_SQRT, {1, 1, 4, 1});
   m.PopulateTensor<float>(m.input(), {0, 1, 2, 4});
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.ExtractVector<float>(m.output()),
               ElementsAreArray(ArrayFloatNear({0, 1, 1.41421, 2})));
   EXPECT_THAT(m.GetTensorShape(m.output()), ElementsAreArray({1, 1, 4, 1}));
@@ -1750,7 +1752,7 @@ TEST(NNAPIDelegate, SubWithNoActivation) {
                     {TensorType_FLOAT32, {}}, ActivationFunctionType_NONE);
   m.PopulateTensor<float>(m.input1(), {-2.0, 0.2, 0.7, 0.8});
   m.PopulateTensor<float>(m.input2(), {0.1, 0.2, 0.3, 0.5});
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.GetOutput(),
               ElementsAreArray(ArrayFloatNear({-2.1, 0.0, 0.4, 0.3})));
 }
@@ -1785,7 +1787,7 @@ TEST(NNAPIDelegate, DivWithNoActivation) {
                     {TensorType_FLOAT32, {}}, ActivationFunctionType_NONE);
   m.PopulateTensor<float>(m.input1(), {-2.0, 0.2, 0.8, 0.8});
   m.PopulateTensor<float>(m.input2(), {0.1, 0.2, 0.4, 0.2});
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.GetOutput(), ElementsAreArray(ArrayFloatNear({-20, 1, 2, 4})));
 }
 
@@ -1825,7 +1827,7 @@ TEST(NNAPIDelegate, ConcatenationThreeDimensionalOneInput) {
   ConcatenationOpModel m0({TensorType_FLOAT32, {2, 1, 2}}, /*axis=*/1,
                           /*num_inputs=*/1);
   m0.SetInput(0, {1.0f, 3.0f, 4.0f, 7.0f});
-  ASSERT_EQ(m0.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m0.Invoke(), kTfLiteOk);
   EXPECT_THAT(m0.GetOutput(), ElementsAreArray({1, 3, 4, 7}));
 }
 
@@ -1836,7 +1838,7 @@ TEST(NNAPIDelegate, ConcatenationFourInputs) {
   m0.SetInput(1, {1.1f, 3.1f, 4.1f, 7.1f});
   m0.SetInput(2, {1.2f, 3.2f, 4.2f, 7.2f});
   m0.SetInput(3, {1.3f, 3.3f, 4.3f, 7.3f});
-  ASSERT_EQ(m0.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m0.Invoke(), kTfLiteOk);
   EXPECT_THAT(m0.GetOutput(),
               ElementsAreArray({
                   1.0f, 3.0f, 1.1f, 3.1f, 1.2f, 3.2f, 1.3f, 3.3f,  //
@@ -1883,7 +1885,7 @@ TEST(NNAPIDelegate, ConcatenationFourInputsQuantized) {
   m0.SetInput(1, {1.1f, 3.1f, 4.1f, 7.1f});
   m0.SetInput(2, {1.2f, 3.2f, 4.2f, 7.2f});
   m0.SetInput(3, {1.3f, 3.3f, 4.3f, 7.3f});
-  ASSERT_EQ(m0.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m0.Invoke(), kTfLiteOk);
   EXPECT_THAT(m0.GetDequantizedOutput(),
               ElementsAreArray(ArrayFloatNear({
                   1.0f, 3.0f, 1.1f, 3.1f, 1.2f, 3.2f, 1.3f, 3.3f,  //
@@ -1907,7 +1909,7 @@ TEST(NNAPIDelegate, ConcatenationFourInputsQuantizedMixedRange) {
   m0.SetInput(1, {1.1f, 3.1f, 4.1f, 7.1f});
   m0.SetInput(2, {1.2f, 3.2f, 4.2f, 7.2f});
   m0.SetInput(3, {1.3f, 3.3f, 4.3f, 7.3f});
-  ASSERT_EQ(m0.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m0.Invoke(), kTfLiteOk);
   EXPECT_THAT(m0.GetDequantizedOutput(),
               ElementsAreArray(ArrayFloatNear({
                   1.0f, 3.0f, 1.1f, 3.1f, 1.2f, 3.2f, 1.3f, 3.3f,  //
@@ -1947,7 +1949,7 @@ TEST(NNAPIDelegate, DequantizeFourDimensionalUint8) {
   DequantizeOpModel m(TensorType_UINT8, {2, 5}, -63.5, 64);
 
   m.SetInput<uint8_t>({0, 1, 2, 3, 4, 251, 252, 253, 254, 255});
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.GetOutput(),
               ElementsAreArray(ArrayFloatNear(
                   {-63.5, -63, -62.5, -62, -61.5, 62, 62.5, 63, 63.5, 64})));
@@ -1958,7 +1960,7 @@ TEST(NNAPIDelegate, DequantizeFourDimensionalInt8Symm) {
   DequantizeOpModel m(TensorType_INT8, {2, 5}, -64, 63.5);
 
   m.SetInput<int8_t>({-128, -127, -126, -125, -124, 123, 124, 125, 126, 127});
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.GetOutput(),
               ElementsAreArray(ArrayFloatNear(
                   {-64, -63.5, -63, -62.5, -62, 61.5, 62, 62.5, 63, 63.5})));
@@ -1988,7 +1990,7 @@ class FloorOpModel : public SingleOpModelWithNNAPI {
 TEST(NNAPIDelegate, FloorSingleDim) {
   FloorOpModel model({2}, TensorType_FLOAT32);
   model.PopulateTensor<float>(model.input(), {8.5, 0.0});
-  ASSERT_EQ(model.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(model.Invoke(), kTfLiteOk);
   EXPECT_THAT(model.GetOutput(), ElementsAreArray({8, 0}));
   EXPECT_THAT(model.GetOutputShape(), ElementsAreArray({2}));
 }
@@ -2007,7 +2009,7 @@ TEST(NNAPIDelegate, FloorMultiDims) {
                                                  -9.9999,
                                                  -0.5,
                                              });
-  ASSERT_EQ(model.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(model.Invoke(), kTfLiteOk);
   EXPECT_THAT(model.GetOutput(),
               ElementsAreArray({0, 8, 0, 9, 0, -1, -9, -1, -10, -1}));
   EXPECT_THAT(model.GetOutputShape(), ElementsAreArray({2, 1, 1, 5}));
@@ -2042,7 +2044,7 @@ TEST(NNAPIDelegate, LocalResponseNormSameAsL2Norm) {
   LocalResponseNormOpModel m({1, 1, 1, 6}, /*radius=*/20, /*bias=*/0.0,
                              /*alpha=*/1.0, /*beta=*/0.5);
   m.SetInput({-1.1, 0.6, 0.7, 1.2, -0.7, 0.1});
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   // The result is every input divided by 2.
   EXPECT_THAT(
       m.GetOutput(),
@@ -2053,7 +2055,7 @@ TEST(NNAPIDelegate, LocalResponseNormWithAlpha) {
   LocalResponseNormOpModel m({1, 1, 1, 6}, /*radius=*/20, /*bias=*/0.0,
                              /*alpha=*/4.0, /*beta=*/0.5);
   m.SetInput({-1.1, 0.6, 0.7, 1.2, -0.7, 0.1});
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   // The result is every input divided by 3.
   EXPECT_THAT(m.GetOutput(), ElementsAreArray(ArrayFloatNear(
                                  {-0.275, 0.15, 0.175, 0.3, -0.175, 0.025})));
@@ -2063,7 +2065,7 @@ TEST(NNAPIDelegate, LocalResponseNormWithBias) {
   LocalResponseNormOpModel m({1, 1, 1, 6}, /*radius=*/20, /*bias=*/9.0,
                              /*alpha=*/4.0, /*beta=*/0.5);
   m.SetInput({-1.1, 0.6, 0.7, 1.2, -0.7, 0.1});
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   // The result is every input divided by 5.
   EXPECT_THAT(
       m.GetOutput(),
@@ -2074,7 +2076,7 @@ TEST(NNAPIDelegate, LocalResponseNormSmallRadius) {
   LocalResponseNormOpModel m({1, 1, 1, 6}, /*radius=*/2, /*bias=*/9.0,
                              /*alpha=*/4.0, /*beta=*/0.5);
   m.SetInput({-1.1, 0.6, 0.7, 1.2, -0.7, 0.1});
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(
       m.GetOutput(),
       ElementsAreArray(ArrayFloatNear(
@@ -2139,7 +2141,7 @@ TEST(NNAPIDelegate, LSHProjectionDense1DInputs) {
   m.SetHash({0.123, 0.456, -0.321, 1.234, 5.678, -4.321});
   m.SetWeight({1.0, 1.0, 1.0, 1.0, 1.0});
 
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
 
 #if defined(__BYTE_ORDER__) && defined(__ORDER_BIG_ENDIAN__) && \
     __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
@@ -2156,7 +2158,7 @@ TEST(NNAPIDelegate, LSHProjectionSparse1DInputs) {
   m.SetInput({12345, 54321, 67890, 9876, -12345678});
   m.SetHash({0.123, 0.456, -0.321, 1.234, 5.678, -4.321});
 
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
 
 #if defined(__BYTE_ORDER__) && defined(__ORDER_BIG_ENDIAN__) && \
     __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
@@ -2175,7 +2177,7 @@ TEST(NNAPIDelegate, LSHProjectionSparse3DInputs) {
   m.SetHash({0.123, 0.456, -0.321, 1.234, 5.678, -4.321});
   m.SetWeight({0.12, 0.34, 0.56, 0.67, 0.78});
 
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
 
 #if defined(__BYTE_ORDER__) && defined(__ORDER_BIG_ENDIAN__) && \
     __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
@@ -2253,7 +2255,7 @@ TEST(NNAPIDelegate, Relu) {
       0, -6, 2, 4,   //
       3, -2, 10, 1,  //
   });
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.GetOutput(), ElementsAreArray({
                                  0, 0, 2, 4,   //
                                  3, 0, 10, 1,  //
@@ -2267,7 +2269,7 @@ TEST(NNAPIDelegate, Relu1) {
       0.0, -0.6, 0.2, -0.4,  //
       0.3, -2.0, 1.1, -0.1,  //
   });
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.GetOutput(), ElementsAreArray({
                                  0.0, -0.6, 0.2, -0.4,  //
                                  0.3, -1.0, 1.0, -0.1,  //
@@ -2281,7 +2283,7 @@ TEST(NNAPIDelegate, Relu6) {
       0, -6, 2, 4,   //
       3, -2, 10, 1,  //
   });
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.GetOutput(), ElementsAreArray({
                                  0, 0, 2, 4,  //
                                  3, 0, 6, 1,  //
@@ -2295,7 +2297,7 @@ TEST(NNAPIDelegate, LogisticFloat) {
       0, -6, 2, 4,   //
       3, -2, 10, 1,  //
   });
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.GetOutput(), ElementsAreArray(ArrayFloatNear({
                                  0.5, 0.002473, 0.880797, 0.982014,       //
                                  0.952574, 0.119203, 0.999955, 0.731059,  //
@@ -2310,7 +2312,7 @@ TEST(NNAPIDelegate, LogisticQuantized) {
       0, -6, 2, 4,   //
       3, -2, 10, 1,  //
   });
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.GetDequantizedOutput<uint8_t>(),
               ElementsAreArray(ArrayFloatNear(
                   {
@@ -2366,7 +2368,7 @@ TEST(ResizeBilinear, Horizontal) {
   ResizeBilinearOpModel m({TensorType_FLOAT32, {1, 1, 2, 1}}, {});
   m.SetInput<float>({3, 6});
   m.SetSize({1, 3});
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.GetOutput<float>(),
               ElementsAreArray(ArrayFloatNear({3, 5, 6})));
 }
@@ -2374,7 +2376,7 @@ TEST(ResizeBilinear, Horizontal) {
 TEST(ResizeBilinear, HorizontalConstant) {
   ResizeBilinearOpModel const_m({TensorType_FLOAT32, {1, 1, 2, 1}}, {1, 3});
   const_m.SetInput<float>({3, 6});
-  ASSERT_EQ(const_m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(const_m.Invoke(), kTfLiteOk);
   EXPECT_THAT(const_m.GetOutput<float>(),
               ElementsAreArray(ArrayFloatNear({3, 5, 6})));
 }
@@ -2383,7 +2385,7 @@ TEST(ResizeBilinear, Vertical) {
   ResizeBilinearOpModel m({TensorType_FLOAT32, {1, 2, 1, 1}}, {});
   m.SetInput<float>({3, 9});
   m.SetSize({3, 1});
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.GetOutput<float>(),
               ElementsAreArray(ArrayFloatNear({3, 7, 9})));
 }
@@ -2391,7 +2393,7 @@ TEST(ResizeBilinear, Vertical) {
 TEST(ResizeBilinear, VerticalConstant) {
   ResizeBilinearOpModel const_m({TensorType_FLOAT32, {1, 2, 1, 1}}, {3, 1});
   const_m.SetInput<float>({3, 9});
-  ASSERT_EQ(const_m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(const_m.Invoke(), kTfLiteOk);
   EXPECT_THAT(const_m.GetOutput<float>(),
               ElementsAreArray(ArrayFloatNear({3, 7, 9})));
 }
@@ -2403,7 +2405,7 @@ TEST(ResizeBilinear, TwoDimensional) {
       9, 12  //
   });
   m.SetSize({3, 3});
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.GetOutput<float>(), ElementsAreArray(ArrayFloatNear({
                                         3, 5, 6,    //
                                         7, 9, 10,   //
@@ -2417,7 +2419,7 @@ TEST(ResizeBilinear, TwoDimensionalConstant) {
       3, 6,  //
       9, 12  //
   });
-  ASSERT_EQ(const_m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(const_m.Invoke(), kTfLiteOk);
   EXPECT_THAT(const_m.GetOutput<float>(), ElementsAreArray(ArrayFloatNear({
                                               3, 5, 6,    //
                                               7, 9, 10,   //
@@ -2483,7 +2485,7 @@ TEST(NNAPIDelegate, PadAdvancedConstTest) {
   PadOpConstModel m({TensorType_FLOAT32, {1, 2, 3, 1}}, {4, 2},
                     {0, 0, 0, 2, 1, 3, 0, 0}, {TensorType_FLOAT32});
   m.SetInput({1, 2, 3, 4, 5, 6});
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.GetOutput(),
               ElementsAreArray({0, 1, 2, 3, 0, 0, 0, 0, 4, 5, 6, 0, 0, 0,
                                 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}));
@@ -2534,7 +2536,7 @@ class SpaceToBatchNDOpConstModel : public SpaceToBatchNDOpModel {
 TEST(NNAPIDelegate, SpaceToBatchNDSimpleConstTest) {
   SpaceToBatchNDOpConstModel m({1, 4, 4, 1}, {2, 2}, {0, 0, 0, 0});
   m.SetInput({1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16});
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.GetOutputShape(), ElementsAreArray({4, 2, 2, 1}));
   EXPECT_THAT(m.GetOutput(), ElementsAreArray({1, 3, 9, 11, 2, 4, 10, 12, 5, 7,
                                                13, 15, 6, 8, 14, 16}));
@@ -2543,7 +2545,7 @@ TEST(NNAPIDelegate, SpaceToBatchNDSimpleConstTest) {
 TEST(NNAPIDelegate, SpaceToBatchNDMultipleInputBatchesConstTest) {
   SpaceToBatchNDOpConstModel m({2, 2, 4, 1}, {2, 2}, {0, 0, 0, 0});
   m.SetInput({1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16});
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.GetOutputShape(), ElementsAreArray({8, 1, 2, 1}));
   EXPECT_THAT(m.GetOutput(), ElementsAreArray({1, 3, 9, 11, 2, 4, 10, 12, 5, 7,
                                                13, 15, 6, 8, 14, 16}));
@@ -2552,7 +2554,7 @@ TEST(NNAPIDelegate, SpaceToBatchNDMultipleInputBatchesConstTest) {
 TEST(NNAPIDelegate, SpaceToBatchNDSimplePaddingConstTest) {
   SpaceToBatchNDOpConstModel m({1, 5, 2, 1}, {3, 2}, {1, 0, 2, 0});
   m.SetInput({1, 2, 3, 4, 5, 6, 7, 8, 9, 10});
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.GetOutputShape(), ElementsAreArray({6, 2, 2, 1}));
   EXPECT_THAT(m.GetOutput(), ElementsAreArray({
                                  0, 0, 0, 5, 0, 0, 0, 6, 0, 1, 0, 7,
@@ -2563,7 +2565,7 @@ TEST(NNAPIDelegate, SpaceToBatchNDSimplePaddingConstTest) {
 TEST(NNAPIDelegate, SpaceToBatchNDComplexPaddingConstTest) {
   SpaceToBatchNDOpConstModel m({1, 4, 2, 1}, {3, 2}, {1, 1, 2, 4});
   m.SetInput({1, 2, 3, 4, 5, 6, 7, 8});
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.GetOutputShape(), ElementsAreArray({6, 2, 4, 1}));
   EXPECT_THAT(m.GetOutput(), ElementsAreArray({
                                  0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 6, 0, 0,
@@ -2619,7 +2621,7 @@ class StridedSliceOpModel : public SingleOpModelWithNNAPI {
 TEST(StridedSliceOpTest, In1D) {
   StridedSliceOpModel<> m({4}, {1}, {1}, {1}, {3}, {1}, {1}, 0, 0, 0, 0, 0);
   m.SetInput({1, 2, 3, 4});
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.GetOutputShape(), ElementsAreArray({2}));
   EXPECT_THAT(m.GetOutput(), ElementsAreArray({2, 3}));
 }
@@ -2627,7 +2629,7 @@ TEST(StridedSliceOpTest, In1D) {
 TEST(StridedSliceOpTest, In1D_BeginMask) {
   StridedSliceOpModel<> m({4}, {1}, {1}, {1}, {3}, {1}, {1}, 1, 0, 0, 0, 0);
   m.SetInput({1, 2, 3, 4});
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.GetOutputShape(), ElementsAreArray({3}));
   EXPECT_THAT(m.GetOutput(), ElementsAreArray({1, 2, 3}));
 }
@@ -2636,7 +2638,7 @@ TEST(StridedSliceOpTest, In2D_Stride2) {
   StridedSliceOpModel<> m({2, 3}, {2}, {0, 0}, {2}, {2, 3}, {2}, {2, 2}, 0, 0,
                           0, 0, 0);
   m.SetInput({1, 2, 3, 4, 5, 6});
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.GetOutputShape(), ElementsAreArray({1, 2}));
   EXPECT_THAT(m.GetOutput(), ElementsAreArray({1, 3}));
 }
@@ -2645,7 +2647,7 @@ TEST(StridedSliceOpTest, In2D_EndMask) {
   StridedSliceOpModel<> m({2, 3}, {2}, {1, 0}, {2}, {2, 2}, {2}, {1, 1}, 0, 2,
                           0, 0, 0);
   m.SetInput({1, 2, 3, 4, 5, 6});
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.GetOutputShape(), ElementsAreArray({1, 3}));
   EXPECT_THAT(m.GetOutput(), ElementsAreArray({4, 5, 6}));
 }
@@ -2654,7 +2656,7 @@ TEST(StridedSliceOpTest, In3D_IdentityShrinkAxis4) {
   StridedSliceOpModel<> m({2, 3, 2}, {3}, {0, 0, 0}, {3}, {2, 3, 1}, {3},
                           {1, 1, 1}, 0, 0, 0, 0, 4);
   m.SetInput({1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12});
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.GetOutputShape(), ElementsAreArray({2, 3}));
   EXPECT_THAT(m.GetOutput(), ElementsAreArray({1, 3, 5, 7, 9, 11}));
 }
@@ -2875,7 +2877,7 @@ TEST(NNAPIDelegate, RnnBlackBoxTest) {
     rnn.SetInput(0, batch_start, batch_end);
     rnn.SetInput(rnn.input_size(), batch_start, batch_end);
 
-    ASSERT_EQ(rnn.InvokeUnchecked(), kTfLiteOk);
+    ASSERT_EQ(rnn.Invoke(), kTfLiteOk);
 
     float* golden_start = rnn_golden_output + i * rnn.num_units();
     float* golden_end = golden_start + rnn.num_units();
@@ -3078,7 +3080,7 @@ class SVDFOpTest : public ::testing::Test {
       float* batch_end = batch_start + svdf_input_size * svdf_num_batches;
       svdf->SetInput(0, batch_start, batch_end);
 
-      ASSERT_EQ(svdf->InvokeUnchecked(), kTfLiteOk);
+      ASSERT_EQ(svdf->Invoke(), kTfLiteOk);
 
       const float* golden_start =
           golden_output + i * svdf_num_units * svdf_num_batches;
@@ -3456,7 +3458,7 @@ class BaseLstmTest : public ::testing::Test {
         lstm->SetInput(b * lstm->num_inputs(), batch_start, batch_end);
       }
 
-      ASSERT_EQ(lstm->InvokeUnchecked(), kTfLiteOk);
+      ASSERT_EQ(lstm->Invoke(), kTfLiteOk);
 
       const int num_outputs = lstm->num_outputs();
       std::vector<float> expected;
@@ -4771,7 +4773,7 @@ TEST(DynamicFloatMeanOpTest, NotKeepDims) {
   std::vector<int> axis = {1, 0, -3, -3};
   m.SetAxis(axis);
   m.SetInput(data);
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.GetOutputShape(), ElementsAreArray({2}));
   EXPECT_THAT(m.GetOutput<float>(), ElementsAreArray(ArrayFloatNear({12, 13})));
 }
@@ -4799,7 +4801,7 @@ TEST(NNAPIDelegate, MeanFloatNotKeepDims) {
   MeanOpConstModel m({TensorType_FLOAT32, {4, 3, 2}}, {TensorType_FLOAT32, {2}},
                      {4}, {1, 0, -3, -3}, false);
   m.SetInput(data);
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.GetOutputShape(), ElementsAreArray({2}));
   EXPECT_THAT(m.GetOutput<float>(), ElementsAreArray(ArrayFloatNear({12, 13})));
 }
@@ -4811,7 +4813,7 @@ TEST(NNAPIDelegate, MeanFloatKeepDims) {
   MeanOpConstModel m({TensorType_FLOAT32, {4, 3, 2}}, {TensorType_FLOAT32, {3}},
                      {2}, {0, 2}, true);
   m.SetInput(data);
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.GetOutputShape(), ElementsAreArray({1, 3, 1}));
   EXPECT_THAT(m.GetOutput<float>(),
               ElementsAreArray(ArrayFloatNear({10.5, 12.5, 14.5})));
@@ -4866,7 +4868,7 @@ TEST(NNAPIDelegate, EmbeddingLookupSimpleTest) {
   m.Set3DWeightMatrix(
       [](int i, int j, int k) { return i + j / 10.0f + k / 100.0f; });
 
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
 
   EXPECT_THAT(m.GetOutput(),
               ElementsAreArray(ArrayFloatNear({
@@ -4951,7 +4953,7 @@ TEST(NNAPIDelegate, HashtableLookupTest2DInput) {
   m.SetHashtableKey({-11, 0, 1234});
   m.SetHashtableValue([](int i, int j) { return i + j / 10.0f; });
 
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
 
   EXPECT_THAT(m.GetOutput(), ElementsAreArray(ArrayFloatNear({
                                  2.0, 2.1,  // 2-nd item
@@ -4974,7 +4976,7 @@ TEST(NNAPIDelegate, HashtableLookupTest1DInput) {
   m.SetHashtableKey({-11, 0, 1234});
   m.SetHashtableValue([](int i) { return i * i / 10.0f; });
 
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
 
   EXPECT_THAT(m.GetOutput(), ElementsAreArray(ArrayFloatNear({
                                  0.4,  // 2-nd item
@@ -5036,7 +5038,7 @@ TEST(NNAPIDelegate, PReluFloat) {
       -2.0f, -2.0f, -2.0f,  // Row 1, Column 2
   });
   m.SetAlpha({0.0f, 1.0f, 2.0f});
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.GetOutput(), ElementsAreArray({
                                  0.0f, 0.0f, 0.0f,    // Row 1, Column 1
                                  1.0f, 1.0f, 1.0f,    // Row 1, Column 2
@@ -5057,7 +5059,7 @@ TEST(NNAPIDelegate, PReluQuantized) {
       -0.25f, -0.25f, -0.25f,  // Row 1, Column 2
   });
   m.SetAlpha({0.0f, 0.5f, -0.5f});
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.GetOutput(), ElementsAreArray(ArrayFloatNear(
                                  {
                                      0.0f, 0.0f, 0.0f,       // Row 1, Column 1
@@ -5147,7 +5149,7 @@ TEST(PadV2OpTest, SimpleConstTest) {
                              {0, 0, 1, 1, 1, 1, 0, 0}, 0.0,
                              {TensorType_FLOAT32});
   m.SetInput({1, 2, 3, 4});
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.GetOutput(), ElementsAreArray({0, 0, 0, 0, 0, 1, 2, 0, 0, 3, 4,
                                                0, 0, 0, 0, 0}));
   EXPECT_THAT(m.GetOutputShape(), ElementsAreArray({1, 4, 4, 1}));
@@ -5159,7 +5161,7 @@ TEST(PadV2OpTest, SimpleConstFloat32ValuedTestUint8) {
   PadV2OpConstModel<float> m({TensorType_FLOAT32, {1, 2, 2, 1}}, {4, 2},
                              {0, 0, 1, 1, 1, 1, 0, 0}, 5, {TensorType_FLOAT32});
   m.SetInput({1, 2, 3, 4});
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.GetOutput(), ElementsAreArray({5, 5, 5, 5, 5, 1, 2, 5, 5, 3, 4,
                                                5, 5, 5, 5, 5}));
   EXPECT_THAT(m.GetOutputShape(), ElementsAreArray({1, 4, 4, 1}));
@@ -5171,7 +5173,7 @@ TEST(PadV2OpTest, Simple4DConstFloat32ValuedTest) {
   PadV2OpConstModel<float> m({TensorType_FLOAT32, {1, 1, 2, 1}}, {4, 2},
                              {0, 1, 0, 0, 0, 0, 0, 1}, 5, {TensorType_FLOAT32});
   m.SetInput({3, 3});
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.GetOutput(), ElementsAreArray({3, 5, 3, 5, 5, 5, 5, 5}));
   EXPECT_THAT(m.GetOutputShape(), ElementsAreArray({2, 1, 2, 2}));
 }
@@ -5181,7 +5183,7 @@ TEST(PadV2OpTest, SimpleDynamicTest) {
                                {TensorType_FLOAT32});
   m.SetInput({1, 2, 3, 4});
   m.SetPaddings({0, 0, 1, 1, 1, 1, 0, 0});
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.GetOutput(), ElementsAreArray({0, 0, 0, 0, 0, 1, 2, 0, 0, 3, 4,
                                                0, 0, 0, 0, 0}));
   EXPECT_THAT(m.GetOutputShape(), ElementsAreArray({1, 4, 4, 1}));
@@ -5192,7 +5194,7 @@ TEST(PadV2OpTest, SimpleDynamicValuedTest) {
                                {TensorType_FLOAT32});
   m.SetInput({1, 2, 3, 4});
   m.SetPaddings({0, 0, 1, 1, 1, 1, 0, 0});
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.GetOutput(), ElementsAreArray({5, 5, 5, 5, 5, 1, 2, 5, 5, 3, 4,
                                                5, 5, 5, 5, 5}));
   EXPECT_THAT(m.GetOutputShape(), ElementsAreArray({1, 4, 4, 1}));
@@ -5202,7 +5204,7 @@ TEST(PadV2OpTest, AdvancedConstTest) {
   PadV2OpConstModel<float> m({TensorType_FLOAT32, {1, 2, 3, 1}}, {4, 2},
                              {0, 0, 0, 2, 1, 3, 0, 0}, 0, {TensorType_FLOAT32});
   m.SetInput({1, 2, 3, 4, 5, 6});
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.GetOutput(),
               ElementsAreArray({0, 1, 2, 3, 0, 0, 0, 0, 4, 5, 6, 0, 0, 0,
                                 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}));
@@ -5214,7 +5216,7 @@ TEST(PadV2OpTest, AdvancedDynamicTest) {
                                {TensorType_FLOAT32});
   m.SetInput({1, 2, 3, 4, 5, 6});
   m.SetPaddings({0, 0, 0, 2, 1, 3, 0, 0});
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.GetOutput(),
               ElementsAreArray({0, 1, 2, 3, 0, 0, 0, 0, 4, 5, 6, 0, 0, 0,
                                 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}));
@@ -5236,7 +5238,7 @@ void SimpleConstTestV2() {
       {tensor_dtype, {1}, -1.0, 1.0}, {tensor_dtype, {}, -1.0, 1.0});
   m.template SetQuantizedInput<integer_type>({-0.8, 0.2, 0.9, 0.7});
   m.template SetQuantizedPadValue<integer_type>(0);
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.template GetDequantizedOutput<integer_type>(),
               ElementsAreArray(DequantizedArrayNear(
                   {0, 0, 0, 0, 0, -0.8, 0.2, 0, 0, 0.9, 0.7, 0, 0, 0, 0, 0},
@@ -5259,7 +5261,7 @@ void SimpleDynamicTestV2() {
   m.template SetQuantizedInput<integer_type>({-0.8, 0.2, 0.9, 0.7});
   m.template SetQuantizedPadValue<integer_type>(0);
   m.SetPaddings({0, 0, 1, 1, 1, 1, 0, 0});
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.template GetDequantizedOutput<integer_type>(),
               ElementsAreArray(DequantizedArrayNear(
                   {0, 0, 0, 0, 0, -0.8, 0.2, 0, 0, 0.9, 0.7, 0, 0, 0, 0, 0},
@@ -5281,7 +5283,7 @@ void AdvancedConstTestV2() {
       {tensor_dtype, {1}, -1.0, 1.0}, {tensor_dtype, {}, -1.0, 1.0});
   m.template SetQuantizedInput<integer_type>({-0.8, 0.2, 0.9, 0.7, 0.1, -0.3});
   m.template SetQuantizedPadValue<integer_type>(0);
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.template GetDequantizedOutput<integer_type>(),
               ElementsAreArray(DequantizedArrayNear(
                   {0, -0.8, 0.2, 0.9, 0, 0, 0, 0, 0.7, 0.1, -0.3, 0, 0, 0,
@@ -5305,7 +5307,7 @@ void AdvancedDynamicTestV2() {
   m.template SetQuantizedInput<integer_type>({-0.8, 0.2, 0.9, 0.7, 0.1, -0.3});
   m.template SetQuantizedPadValue<integer_type>(0);
   m.SetPaddings({0, 0, 0, 2, 1, 3, 0, 0});
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.template GetDequantizedOutput<integer_type>(),
               ElementsAreArray(DequantizedArrayNear(
                   {0, -0.8, 0.2, 0.9, 0, 0, 0, 0, 0.7, 0.1, -0.3, 0, 0, 0,
@@ -5330,7 +5332,7 @@ void SimpleConstValuedTest() {
       {tensor_dtype, {1}, -1.0, 1.0}, {tensor_dtype, {}, -1.0, 1.0});
   m.template SetQuantizedInput<integer_type>({-0.8, 0.2, 0.9, 0.7});
   m.template SetQuantizedPadValue<integer_type>(-0.5);
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.template GetDequantizedOutput<integer_type>(),
               ElementsAreArray(DequantizedArrayNear(
                   {-0.5, -0.5, -0.5, -0.5, -0.5, -0.8, 0.2, -0.5, -0.5, 0.9,
@@ -5354,7 +5356,7 @@ void SimpleDynamicValuedTest() {
   m.template SetQuantizedInput<integer_type>({-0.8, 0.2, 0.9, 0.7});
   m.template SetQuantizedPadValue<integer_type>(-0.5);
   m.SetPaddings({0, 0, 1, 1, 1, 1, 0, 0});
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.template GetDequantizedOutput<integer_type>(),
               ElementsAreArray(DequantizedArrayNear(
                   {-0.5, -0.5, -0.5, -0.5, -0.5, -0.8, 0.2, -0.5, -0.5, 0.9,
@@ -5377,7 +5379,7 @@ void AdvancedConstValuedTest() {
       {tensor_dtype, {1}, -1.0, 1.0}, {tensor_dtype, {}, -1.0, 1.0});
   m.template SetQuantizedInput<integer_type>({-0.8, 0.2, 0.9, 0.7, 0.1, -0.3});
   m.template SetQuantizedPadValue<integer_type>(-0.5);
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.template GetDequantizedOutput<integer_type>(),
               ElementsAreArray(DequantizedArrayNear(
                   {-0.5, -0.8, 0.2,  0.9,  -0.5, -0.5, -0.5, -0.5, 0.7,  0.1,
@@ -5402,7 +5404,7 @@ void AdvancedDynamicValuedTest() {
   m.template SetQuantizedInput<integer_type>({-0.8, 0.2, 0.9, 0.7, 0.1, -0.3});
   m.template SetQuantizedPadValue<integer_type>(-0.5);
   m.SetPaddings({0, 0, 0, 2, 1, 3, 0, 0});
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.template GetDequantizedOutput<integer_type>(),
               ElementsAreArray(DequantizedArrayNear(
                   {-0.5, -0.8, 0.2,  0.9,  -0.5, -0.5, -0.5, -0.5, 0.7,  0.1,
@@ -5423,7 +5425,7 @@ TEST(QuantizedPadV2OpTest, Int8AdvancedDynamicValuedTest) {
 // FloatLeakyReluOpModel and QuantizedLeakyReluOpModel.
 class LeakyReluOpModel : public SingleOpModelWithNNAPI {
  public:
-  LeakyReluOpModel(const TensorData& input, const float& alpha)
+  LeakyReluOpModel(const TensorData& input, const float alpha)
       : input_type_(input.type) {
     input_ = AddInput(input);
     output_ = AddOutput({input.type, input.shape, input.min, input.max});
@@ -5457,7 +5459,7 @@ TEST(NNAPIDelegate, LeakyReluFloat) {
       0.0f, 1.0f, 3.0f,    // Row 1
       1.0f, -1.0f, -2.0f,  // Row 2
   });
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.GetOutput(), ElementsAreArray({
                                  0.0f, 1.0f, 3.0f,    // Row 1
                                  1.0f, -0.5f, -1.0f,  // Row 2
@@ -5473,7 +5475,7 @@ TEST(NNAPIDelegate, LeakyReluQuantized) {
       0.0f, 1.0f, 3.0f,    // Row 1
       1.0f, -1.0f, -2.0f,  // Row 2
   });
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.GetOutput(), ElementsAreArray(ArrayFloatNear(
                                  {
                                      0.0f, 1.0f, 3.0f,    // Row 1
@@ -5647,11 +5649,11 @@ TEST(NNAPIDelegate, CustomFloorVendorExtension) {
   CustomFloorOpModel m(options, {TensorType_FLOAT32, {1, 2, 2, 1}},
                        {TensorType_FLOAT32, {1, 2, 2, 1}});
   m.PopulateTensor<float>(m.input(), {0, 0.2, 1.7, 2.8});
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.GetOutput(), ElementsAreArray({0.0, 0.0, 1.0, 2.0}));
 }
 
-TEST(NNAPIDelegate, CustomFloorVendorExtensionDynamic) {
+TEST(NNAPIDelegate, DISABLED_CustomFloorVendorExtensionDynamic) {
   // Models with dynamic dimensions and vendor plugin is not supported before
   // NNAPI 1.2 (API level 29).
   if (NnApiImplementation()->android_sdk_version <
@@ -5694,7 +5696,7 @@ TEST(NNAPIDelegate, CustomFloorVendorExtensionDynamic) {
   EXPECT_EQ(m.ResizeInputTensor(m.input(), {2, 2, 2, 1}), kTfLiteOk);
   EXPECT_EQ(m.AllocateTensors(), kTfLiteOk);
   m.PopulateTensor<float>(m.input(), {0, 0.2, 1.7, 2.8, 3.4, 4.1, 5.9, 6.3});
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.GetOutput(),
               ElementsAreArray({0.0, 0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0}));
 
@@ -5702,7 +5704,7 @@ TEST(NNAPIDelegate, CustomFloorVendorExtensionDynamic) {
   EXPECT_EQ(m.ResizeInputTensor(m.input(), {1, 2, 2, 1}), kTfLiteOk);
   EXPECT_EQ(m.AllocateTensors(), kTfLiteOk);
   m.PopulateTensor<float>(m.input(), {1.7, 2.8, 3.4, 4.1});
-  ASSERT_EQ(m.InvokeUnchecked(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.GetOutput(), ElementsAreArray({1.0, 2.0, 3.0, 4.0}));
 }
 

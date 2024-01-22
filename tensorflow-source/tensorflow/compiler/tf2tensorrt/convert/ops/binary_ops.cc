@@ -25,22 +25,22 @@ namespace convert {
 const BinaryOperationMapType* BinaryOperationMap() {
   static const auto* map = new BinaryOperationMapType({
     {"Add", nvinfer1::ElementWiseOperation::kSUM},
-    {"AddV2", nvinfer1::ElementWiseOperation::kSUM},
-    {"Mul", nvinfer1::ElementWiseOperation::kPROD},
-    {"Sub", nvinfer1::ElementWiseOperation::kSUB},
-    {"Div", nvinfer1::ElementWiseOperation::kDIV},
-    {"FloorDiv", nvinfer1::ElementWiseOperation::kFLOOR_DIV},
-    {"RealDiv", nvinfer1::ElementWiseOperation::kDIV},
-    {"Minimum", nvinfer1::ElementWiseOperation::kMIN},
-    {"Maximum", nvinfer1::ElementWiseOperation::kMAX},
-    {"Pow", nvinfer1::ElementWiseOperation::kPOW},
+        {"AddV2", nvinfer1::ElementWiseOperation::kSUM},
+        {"Mul", nvinfer1::ElementWiseOperation::kPROD},
+        {"Sub", nvinfer1::ElementWiseOperation::kSUB},
+        {"Div", nvinfer1::ElementWiseOperation::kDIV},
+        {"FloorDiv", nvinfer1::ElementWiseOperation::kFLOOR_DIV},
+        {"RealDiv", nvinfer1::ElementWiseOperation::kDIV},
+        {"Minimum", nvinfer1::ElementWiseOperation::kMIN},
+        {"Maximum", nvinfer1::ElementWiseOperation::kMAX},
+        {"Pow", nvinfer1::ElementWiseOperation::kPOW},
 #if IS_TRT_VERSION_GE(8, 2, 0, 0)
-    {"Greater", nvinfer1::ElementWiseOperation::kGREATER},
-    {"Less", nvinfer1::ElementWiseOperation::kLESS},
-    {"Equal", nvinfer1::ElementWiseOperation::kEQUAL},
-    // Operators are implemented as NOT Less and NOT Greater, respectively.
-    {"GreaterEqual", nvinfer1::ElementWiseOperation::kLESS},
-    {"LessEqual", nvinfer1::ElementWiseOperation::kGREATER},
+        {"Greater", nvinfer1::ElementWiseOperation::kGREATER},
+        {"Less", nvinfer1::ElementWiseOperation::kLESS},
+        {"Equal", nvinfer1::ElementWiseOperation::kEQUAL},
+        // Operators are implemented as NOT Less and NOT Greater, respectively.
+        {"GreaterEqual", nvinfer1::ElementWiseOperation::kLESS},
+        {"LessEqual", nvinfer1::ElementWiseOperation::kGREATER},
 #endif
   });
   return map;
@@ -48,8 +48,8 @@ const BinaryOperationMapType* BinaryOperationMap() {
 
 const BinaryOperationMapType* BinaryBooleanOperationMap() {
   static const auto* map = new BinaryOperationMapType({
-    {"LogicalOr", nvinfer1::ElementWiseOperation::kOR},
-    {"LogicalAnd", nvinfer1::ElementWiseOperation::kAND},
+      {"LogicalOr", nvinfer1::ElementWiseOperation::kOR},
+      {"LogicalAnd", nvinfer1::ElementWiseOperation::kAND},
   });
   return map;
 }
@@ -65,7 +65,7 @@ class ConvertBinaryImpl {
       const std::vector<string>& implicit_batch_not_supported_ops = {},
       bool both_tensors = false) {
     const auto& node_def = params.node_def;
-    const auto op = node_def.op();
+    const auto& op = node_def.op();
     const auto op_pair = pOperMap_->find(op);
     if (op_pair == pOperMap_->end()) {
       return errors::Unimplemented("Binary op: ", op, " not supported");
@@ -82,7 +82,7 @@ class ConvertBinaryImpl {
     if ((convertToBool_ = find_name(op, implicit_batch_not_supported_ops))) {
       if (params.use_implicit_batch) {
         return errors::Unimplemented(
-            "Binary op: '", op, "' is not supported in implicit batch mode");
+            convert_not_supported_implicit(op, node_def.name(), "Binary"));
       }
     }
 
@@ -107,7 +107,7 @@ class ConvertBinaryImpl {
           params.validation_only, &tensor_[i], node_def, i));
     }
     operation_ = op_pair->second;
-    return Status::OK();
+    return OkStatus();
   }
 
   Status ConvertImpl(const OpConverterParams& params,
@@ -133,12 +133,12 @@ class ConvertBinaryImpl {
         TFTRT_RETURN_ERROR_IF_NULLPTR(unary_layer, node_def.name());
         params.outputs->push_back(
             TRT_TensorOrWeights(unary_layer->getOutput(0)));
-        return Status::OK();
+        return OkStatus();
       }
     }
 
     params.outputs->push_back(TRT_TensorOrWeights(output));
-    return Status::OK();
+    return OkStatus();
   }
 
   static constexpr std::array<InputArgSpec, 2> InputSpec() {
@@ -157,13 +157,11 @@ class ConvertBinaryImpl {
 class ConvertBinary : public OpConverterBase<ConvertBinary>,
                       protected ConvertBinaryImpl {
  public:
-  explicit ConvertBinary(OpConverterParams* params)
-      : OpConverterBase<ConvertBinary>(params),
+  explicit ConvertBinary(const OpConverterParams* params)
+      : OpConverterBase<ConvertBinary>(
+            params,
+            {DataType::DT_FLOAT, DataType::DT_HALF, DataType::DT_INT32}),
         ConvertBinaryImpl(BinaryOperationMap()) {}
-
-  std::vector<DataType> AllowedDataTypes(OpConverterParams* params) {
-    return {DataType::DT_FLOAT, DataType::DT_HALF, DataType::DT_INT32};
-  }
 
   static constexpr std::array<InputArgSpec, 2> InputSpec() {
     return ConvertBinaryImpl::InputSpec();
@@ -190,13 +188,9 @@ class ConvertBinary : public OpConverterBase<ConvertBinary>,
 class ConvertBooleanBinary : public OpConverterBase<ConvertBooleanBinary>,
                              public ConvertBinaryImpl {
  public:
-  explicit ConvertBooleanBinary(OpConverterParams* params)
-      : OpConverterBase<ConvertBooleanBinary>(params),
+  explicit ConvertBooleanBinary(const OpConverterParams* params)
+      : OpConverterBase<ConvertBooleanBinary>(params, {DataType::DT_BOOL}),
         ConvertBinaryImpl(BinaryBooleanOperationMap()) {}
-
-  std::vector<DataType> AllowedDataTypes(OpConverterParams* params) {
-    return {DataType::DT_BOOL};
-  }
 
   static constexpr std::array<InputArgSpec, 2> InputSpec() {
     return ConvertBinaryImpl::InputSpec();

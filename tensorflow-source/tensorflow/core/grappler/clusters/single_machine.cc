@@ -98,8 +98,7 @@ Status SingleMachine::Provision() {
           GpuIdManager::TfToPlatformDeviceId(tf_device_id, &platform_device_id);
       if (!s.ok()) {
         return errors::Unavailable("Unknown TF GPU device with id ",
-                                   tf_device_id.value(), ": ",
-                                   s.error_message());
+                                   tf_device_id.value(), ": ", s.message());
       }
       attr = GetLocalGPUInfo(platform_device_id);
     } else if (dev.device_type().find("XLA") == string::npos) {
@@ -118,7 +117,7 @@ Status SingleMachine::Provision() {
   if (cpu_allocator_stats_enabled_) {
     TF_RETURN_IF_ERROR(ClearAllocatorStats());
   }
-  return Status::OK();
+  return OkStatus();
 }
 
 Status SingleMachine::Initialize(const GrapplerItem& item) {
@@ -130,7 +129,7 @@ Status SingleMachine::Initialize(const GrapplerItem& item) {
     queue_runner_defs_ = item.queue_runners;
     last_graph_id_ = item.id;
   }
-  return Status::OK();
+  return OkStatus();
 }
 
 Status SingleMachine::Shutdown() {
@@ -140,7 +139,7 @@ Status SingleMachine::Shutdown() {
   last_graph_ = nullptr;
   already_provisioned = false;
 
-  return Status::OK();
+  return OkStatus();
 }
 
 Status SingleMachine::Run(const GraphDef& graph_def,
@@ -201,14 +200,14 @@ Status SingleMachine::Run(const GraphDef& graph_def,
 
   last_graph_ = &graph_def;
 
-  return Status::OK();
+  return OkStatus();
 }
 
 Status SingleMachine::EnablePeakMemoryStats() {
   EnableCPUAllocatorStats();
   cpu_allocator_stats_enabled_ = true;
   // No need to enable GPU allocator stats since its stats are always collected.
-  return Status::OK();
+  return OkStatus();
 }
 
 Status SingleMachine::GetPeakMemoryUsage(
@@ -216,7 +215,7 @@ Status SingleMachine::GetPeakMemoryUsage(
   // Cpu_allocator->TracksAllocationSizes() returns true doesn't always mean the
   // the AllocatorStats would be collected.
   if (!cpu_allocator_stats_enabled_) {
-    return Status(error::INVALID_ARGUMENT,
+    return Status(absl::StatusCode::kInvalidArgument,
                   "Tracking allocation for CPU is not enabled.");
   }
 
@@ -228,7 +227,7 @@ Status SingleMachine::GetPeakMemoryUsage(
   for (Device* device : devices) {
     auto* allocator = device->GetAllocator(AllocatorAttributes());
     if (!allocator->TracksAllocationSizes()) {
-      return Status(error::INVALID_ARGUMENT,
+      return Status(absl::StatusCode::kInvalidArgument,
                     "Tracking allocation is not enabled.");
     }
     absl::optional<AllocatorStats> stats = allocator->GetStats();
@@ -236,7 +235,7 @@ Status SingleMachine::GetPeakMemoryUsage(
         (stats ? stats->peak_bytes_in_use : 0);
   }
 
-  return Status::OK();
+  return OkStatus();
 }
 
 Status SingleMachine::RunWithTimeout(
@@ -274,7 +273,7 @@ Status SingleMachine::RunWithTimeout(
 
 Status SingleMachine::CloseSession(bool use_timeout) {
   if (!session_ || !thread_pool_) {
-    return Status::OK();
+    return OkStatus();
   }
 
   {
@@ -314,7 +313,7 @@ Status SingleMachine::CloseSession(bool use_timeout) {
                                timeout_s_, " seconds, aborting");
   }
 
-  return Status::OK();
+  return OkStatus();
 }
 
 Status SingleMachine::ShutdownSession() {
@@ -340,7 +339,7 @@ Status SingleMachine::ShutdownSession() {
                                timeout_s_, " seconds");
   }
 
-  return Status::OK();
+  return OkStatus();
 }
 
 Status SingleMachine::ResetSession() {
@@ -376,7 +375,7 @@ Status SingleMachine::ResetSession() {
     // We currently don't care about the client device.
   }
 
-  return Status::OK();
+  return OkStatus();
 }
 
 void SingleMachine::MergeCosts(CostGraphDef* graph_costs,
@@ -445,7 +444,7 @@ Status SingleMachine::ClearAllocatorStats() const {
   // Cpu_allocator->TracksAllocationSizes() returns true doesn't always mean the
   // the AllocatorStats would be collected.
   if (!cpu_allocator_stats_enabled_) {
-    return Status(error::INVALID_ARGUMENT,
+    return Status(absl::StatusCode::kInvalidArgument,
                   "Tracking allocation for CPU is not enabled.");
   }
 
@@ -456,17 +455,17 @@ Status SingleMachine::ClearAllocatorStats() const {
   for (Device* device : devices) {
     auto* allocator = device->GetAllocator(AllocatorAttributes());
     if (!allocator->TracksAllocationSizes()) {
-      return Status(error::INVALID_ARGUMENT,
+      return Status(absl::StatusCode::kInvalidArgument,
                     "Tracking allocation is not enabled.");
     }
     if (!allocator->ClearStats()) {
       return Status(
-          error::INVALID_ARGUMENT,
+          absl::StatusCode::kInvalidArgument,
           absl::StrCat("Clearing allocation stats is not supported for ",
                        device->name()));
     }
   }
-  return Status::OK();
+  return OkStatus();
 }
 
 }  // namespace grappler

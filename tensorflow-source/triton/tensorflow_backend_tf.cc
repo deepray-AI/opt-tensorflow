@@ -1,4 +1,4 @@
-// Copyright (c) 2019, NVIDIA CORPORATION. All rights reserved.
+// Copyright (c) 2019-2023, NVIDIA CORPORATION. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -26,6 +26,7 @@
 
 #include "triton/tensorflow_backend_tf.h"
 
+#include "tensorflow/c/c_api.h"
 #include "tensorflow/cc/saved_model/loader.h"
 #include "tensorflow/cc/saved_model/tag_constants.h"
 #include "tensorflow/core/common_runtime/device.h"
@@ -48,7 +49,7 @@
 #include "tensorflow/core/util/device_name_utils.h"
 #include "third_party/gpus/cuda/include/cuda_runtime_api.h"
 
-TRITONTF_Error* TRITONTF_ErrorNew(const std::string& str);
+TRITONTF_Error* TRITONTF_ErrorNew(const std::string_view& str);
 TRITONTF_Shape* TRITONTF_ShapeNew(size_t rank, int64_t* dims);
 void TRITONTF_ShapeDelete(TRITONTF_Shape* shape);
 TRITONTF_IOList* TRITONTF_IOListNew(
@@ -59,8 +60,8 @@ void TRITONTF_IOListDelete(TRITONTF_IOList* list);
 #define RETURN_IF_TF_ERROR(TFS)                           \
   do {                                                    \
     const tensorflow::Status& status__ = (TFS);           \
-    if (status__.code() != 0) {                           \
-      return TRITONTF_ErrorNew(status__.error_message()); \
+    if (status__ != tsl::OkStatus()) {                    \
+      return TRITONTF_ErrorNew(status__.message());       \
     }                                                     \
   } while (false)
 
@@ -612,11 +613,13 @@ ModelImpl::RunOp(const std::string& op_name)
 //
 
 TRITONTF_Error*
-TRITONTF_ErrorNew(const std::string& str)
+TRITONTF_ErrorNew(const std::string_view& str)
 {
   TRITONTF_Error* error = new TRITONTF_Error;
-  error->msg_ = new char[str.size() + 1];
-  strcpy(error->msg_, str.c_str());
+  size_t buff_len = str.size() + 1;
+  error->msg_ = new char[buff_len];
+  strncpy(error->msg_, str.data(), str.size());
+  error->msg_[str.size()] = '\0';
   return error;
 }
 
@@ -990,18 +993,23 @@ TRITONTF_ModelCreateFromSavedModel(
   auto sig_itr =
       bundle->meta_graph_def.signature_def().find(SIGNATURE_DEF_KEY_TO_USE);
   if (sig_itr == bundle->meta_graph_def.signature_def().end()) {
-    // If default serving signature_def key is not found, maybe it is named
-    // something else, use one that is neither init_op key nor train_op key
-    for (sig_itr = bundle->meta_graph_def.signature_def().begin();
-         sig_itr != bundle->meta_graph_def.signature_def().end(); sig_itr++) {
-      if ((sig_itr->first != INIT_OP_SIGNATURE_DEF_KEY) &&
-          (sig_itr->first != TRAIN_OP_SIGNATURE_DEF_KEY)) {
-        LOG(WARNING) << "unable to find serving signature '"
-                     << SIGNATURE_DEF_KEY_TO_USE
-                     << "', using signature '" << sig_itr->first << "'";
-        break;
+    // If serving signature_def key is not specified and default is not found,
+    // maybe it is named something else. Use one that is neither init_op key
+    // nor train_op key
+    if (strcmp(signature_def, "") == 0) {
+      for (sig_itr = bundle->meta_graph_def.signature_def().begin();
+           sig_itr != bundle->meta_graph_def.signature_def().end(); sig_itr++) {
+        if ((sig_itr->first != INIT_OP_SIGNATURE_DEF_KEY) &&
+            (sig_itr->first != TRAIN_OP_SIGNATURE_DEF_KEY)) {
+          LOG(WARNING) << "unable to find serving signature '"
+                       << SIGNATURE_DEF_KEY_TO_USE;
+          LOG(WARNING) << "using signature '" << sig_itr->first << "'";
+          break;
+        }
       }
     }
+
+    // If serving signature_def key is not found, return error
     if (sig_itr == bundle->meta_graph_def.signature_def().end()) {
       return TRITONTF_ErrorNew(
           "unable to load model '" + std::string(model_name) + "', expected '" +
@@ -1170,5 +1178,20 @@ TRITONTF_ModelInitialize(
     }
   }
 
+  return nullptr;
+}
+
+TRITONTF_Error*
+TRITONTF_LoadAndRegisterLibrary(const char* path)
+{
+  TF_Status* status = TF_NewStatus();
+  TF_Library* lib = TF_LoadLibrary(path, status);
+  TF_Code status_code = TF_GetCode(status);
+  std::string status_msg(TF_Message(status));
+  TF_DeleteStatus(status);
+  if (status_code != TF_OK) {
+    return TRITONTF_ErrorNew(status_msg);
+  }
+  
   return nullptr;
 }

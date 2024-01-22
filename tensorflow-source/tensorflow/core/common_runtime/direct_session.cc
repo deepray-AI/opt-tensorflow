@@ -109,7 +109,7 @@ Status NewThreadPoolFromThreadPoolOptions(
         !options.config.experimental().disable_thread_spinning(),
         /*allocator=*/nullptr);
     *owned = true;
-    return Status::OK();
+    return OkStatus();
   }
 
   // Global, named threadpool.
@@ -137,12 +137,16 @@ Status NewThreadPoolFromThreadPoolOptions(
   }
   *owned = false;
   *pool = mvalue->second;
-  return Status::OK();
+  return OkStatus();
 }
 
-thread::ThreadPool* GlobalThreadPool(const SessionOptions& options) {
+// Function to create a global thread pool for sessions. The thread number is
+// set as `num_threads` if `num_threads` > 0, otherwise it will be parsed from
+// SessionOptions.
+thread::ThreadPool* GlobalThreadPool(const SessionOptions& options,
+                                     int32_t num_threads) {
   static thread::ThreadPool* const thread_pool =
-      NewThreadPoolFromSessionOptions(options);
+      NewThreadPoolFromSessionOptions(options, num_threads);
   return thread_pool;
 }
 
@@ -204,7 +208,7 @@ class DirectSessionFactory : public SessionFactory {
       sessions_.push_back(session);
     }
     *out_session = session;
-    return Status::OK();
+    return OkStatus();
   }
 
   Status Reset(const SessionOptions& options,
@@ -340,7 +344,6 @@ DirectSession::DirectSession(const SessionOptions& options,
     thread_pools_.emplace_back(NewThreadPoolFromSessionOptions(options_),
                                true /* owned */);
   } else {
-    thread_pools_.emplace_back(GlobalThreadPool(options), false /* owned */);
     // Run locally if environment value of TF_NUM_INTEROP_THREADS is negative
     // and config.inter_op_parallelism_threads is unspecified or negative.
     static const int env_num_threads = NumInterOpThreadsFromEnvironment();
@@ -349,13 +352,20 @@ DirectSession::DirectSession(const SessionOptions& options,
          env_num_threads < 0)) {
       run_in_caller_thread_ = true;
     }
+
+    // `run_in_caller_thread_` means the session is expected to run with single
+    // thread, but it will be dispatched to global thread pool if there're
+    // multiple executors. To keep consistent behavior, set thread number to 1.
+    thread_pools_.emplace_back(
+        GlobalThreadPool(options, run_in_caller_thread_ ? 1 : 0),
+        false /* owned */);
   }
   // The default value of sync_on_finish will be flipped soon and this
   // environment variable will be removed as well.
   const Status status =
       ReadBoolFromEnvVar("TF_SYNC_ON_FINISH", true, &sync_on_finish_);
   if (!status.ok()) {
-    LOG(ERROR) << status.error_message();
+    LOG(ERROR) << status.message();
   }
   session_handle_ =
       strings::StrCat("direct", strings::FpToString(random::New64()));
@@ -422,7 +432,7 @@ Status DirectSession::Create(GraphDef&& graph) {
     }
     return ExtendLocked(std::move(graph));
   }
-  return Status::OK();
+  return OkStatus();
 }
 
 Status DirectSession::Extend(const GraphDef& graph) {
@@ -463,7 +473,7 @@ Status DirectSession::ExtendLocked(GraphDef&& graph) {
     execution_state_.swap(state);
     TF_RETURN_IF_ERROR(flib_def_->AddLibrary(graph.library()));
   }
-  return Status::OK();
+  return OkStatus();
 }
 
 Status DirectSession::Run(const NamedTensorList& inputs,
@@ -491,7 +501,7 @@ Status DirectSession::CreateDebuggerState(
   TF_RETURN_IF_ERROR(debugger_state->get()->PublishDebugMetadata(
       global_step, session_run_index, executor_step_index, input_names,
       output_names, target_names));
-  return Status::OK();
+  return OkStatus();
 }
 
 Status DirectSession::DecorateAndPublishGraphForDebug(
@@ -502,7 +512,7 @@ Status DirectSession::DecorateAndPublishGraphForDebug(
 
   TF_RETURN_IF_ERROR(decorator->DecorateGraph(graph, device));
   TF_RETURN_IF_ERROR(decorator->PublishGraph(*graph, device->name()));
-  return Status::OK();
+  return OkStatus();
 }
 
 Status DirectSession::RunInternal(
@@ -542,6 +552,12 @@ Status DirectSession::RunInternal(
         CreateDebuggerState(executors_and_keys->callable_options,
                             run_options.debug_options().global_step(), step_id,
                             executor_step_count, &debugger_state));
+  }
+
+  if (run_metadata != nullptr &&
+      options_.config.experimental().has_session_metadata()) {
+    *run_metadata->mutable_session_metadata() =
+        options_.config.experimental().session_metadata();
   }
 
 #ifndef __ANDROID__
@@ -588,7 +604,7 @@ Status DirectSession::RunInternal(
       pool = nullptr;
     }
   } else if (threadpool_options.inter_op_threadpool != nullptr) {
-    threadpool_wrapper = absl::make_unique<thread::ThreadPool>(
+    threadpool_wrapper = std::make_unique<thread::ThreadPool>(
         threadpool_options.inter_op_threadpool);
     pool = threadpool_wrapper.get();
   } else {
@@ -826,7 +842,7 @@ Status DirectSession::RunInternal(
   }
   metrics::UpdateGraphExecTime(options_.env->NowMicros() - start_time_usecs);
 
-  return Status::OK();
+  return OkStatus();
 }
 
 Status DirectSession::Run(const RunOptions& run_options,
@@ -892,7 +908,7 @@ Status DirectSession::Run(const RunOptions& run_options,
   }
   const Status s = call_frame.SetArgs(feed_args);
   if (errors::IsInternal(s)) {
-    return errors::InvalidArgument(s.error_message());
+    return errors::InvalidArgument(s.message());
   } else if (!s.ok()) {
     return s;
   }
@@ -913,7 +929,7 @@ Status DirectSession::Run(const RunOptions& run_options,
     const Status s = call_frame.ConsumeRetvals(
         &sorted_outputs, /* allow_dead_tensors = */ false);
     if (errors::IsInternal(s)) {
-      return errors::InvalidArgument(s.error_message());
+      return errors::InvalidArgument(s.message());
     } else if (!s.ok()) {
       return s;
     }
@@ -947,7 +963,7 @@ Status DirectSession::Run(const RunOptions& run_options,
     metrics::RecordGraphOutputTensors(output_size);
   }
 
-  return Status::OK();
+  return OkStatus();
 }
 
 Status DirectSession::PRunSetup(const std::vector<string>& input_names,
@@ -1026,7 +1042,7 @@ Status DirectSession::PRunSetup(const std::vector<string>& input_names,
   }
 
   *handle = run_state_args.handle;
-  return Status::OK();
+  return OkStatus();
 }
 
 Status DirectSession::PRun(const string& handle, const NamedTensorList& inputs,
@@ -1192,7 +1208,7 @@ Status DirectSession::SendPRunInputs(const NamedTensorList& inputs,
       return s;
     }
   }
-  return Status::OK();
+  return OkStatus();
 }
 
 Status DirectSession::RecvPRunOutputs(
@@ -1237,7 +1253,7 @@ Status DirectSession::RecvPRunOutputs(
 
     (*outputs)[output_offset] = output_tensor;
   }
-  return Status::OK();
+  return OkStatus();
 }
 
 Status DirectSession::CheckFetch(const NamedTensorList& feeds,
@@ -1298,7 +1314,7 @@ Status DirectSession::CheckFetch(const NamedTensorList& feeds,
       }
     }
   }
-  return Status::OK();
+  return OkStatus();
 }
 
 Status DirectSession::CreateExecutors(
@@ -1359,11 +1375,12 @@ Status DirectSession::CreateExecutors(
       device_mgr_.get(), options_.env, &options_.config, graph_def_version,
       func_info->flib_def.get(), optimizer_opts, thread_pools_[0].first,
       /*parent=*/nullptr, session_metadata,
-      Rendezvous::Factory{
-          [](const int64_t, const DeviceMgr* device_mgr, Rendezvous** r) {
-            *r = new IntraProcessRendezvous(device_mgr);
-            return Status::OK();
-          }}));
+      Rendezvous::Factory{[](const int64_t, const DeviceMgr* device_mgr,
+                             tsl::core::RefCountPtr<Rendezvous>* r) {
+        *r = tsl::core::RefCountPtr<Rendezvous>(
+            new IntraProcessRendezvous(device_mgr));
+        return OkStatus();
+      }}));
 
   GraphOptimizer optimizer(optimizer_opts);
   for (auto iter = graphs.begin(); iter != graphs.end(); ++iter) {
@@ -1471,7 +1488,7 @@ Status DirectSession::CreateExecutors(
 
   *out_executors_and_keys = std::move(ek);
   *out_func_info = std::move(func_info);
-  return Status::OK();
+  return OkStatus();
 }
 
 Status DirectSession::GetOrCreateExecutors(
@@ -1506,7 +1523,7 @@ Status DirectSession::GetOrCreateExecutors(
     auto it = executors_.find(key);
     if (it != executors_.end()) {
       *executors_and_keys = it->second.get();
-      return Status::OK();
+      return OkStatus();
     }
   }
 
@@ -1539,7 +1556,7 @@ Status DirectSession::GetOrCreateExecutors(
     auto it = executors_.find(sorted_key);
     if (it != executors_.end()) {
       *executors_and_keys = it->second.get();
-      return Status::OK();
+      return OkStatus();
     }
   }
 
@@ -1585,7 +1602,7 @@ Status DirectSession::GetOrCreateExecutors(
   executors_.emplace(key, insert_result.first->second);
   *executors_and_keys = insert_result.first->second.get();
 
-  return Status::OK();
+  return OkStatus();
 }
 
 Status DirectSession::CreateGraphs(
@@ -1756,24 +1773,24 @@ Status DirectSession::CreateGraphs(
     const DeviceAttributes& attrs = d->attributes();
     response->emplace_back(attrs);
   }
-  return ::tensorflow::Status::OK();
+  return OkStatus();
 }
 
 ::tensorflow::Status DirectSession::Reset(
     const std::vector<string>& containers) {
   device_mgr_->ClearContainers(containers);
-  return ::tensorflow::Status::OK();
+  return OkStatus();
 }
 
 ::tensorflow::Status DirectSession::Close() {
   cancellation_manager_->StartCancel();
   {
     mutex_lock l(closed_lock_);
-    if (closed_) return ::tensorflow::Status::OK();
+    if (closed_) return OkStatus();
     closed_ = true;
   }
   if (factory_ != nullptr) factory_->Deregister(this);
-  return ::tensorflow::Status::OK();
+  return OkStatus();
 }
 
 DirectSession::RunState::RunState(int64_t step_id,
@@ -1843,13 +1860,13 @@ void DirectSession::WaitForNotification(Notification* n, RunState* run_state,
     const bool notified =
         WaitForNotificationWithTimeout(notification, timeout_in_us);
     if (!notified) {
-      return Status(error::DEADLINE_EXCEEDED,
+      return Status(absl::StatusCode::kDeadlineExceeded,
                     "Timed out waiting for notification");
     }
   } else {
     notification->WaitForNotification();
   }
-  return Status::OK();
+  return OkStatus();
 }
 
 Status DirectSession::MakeCallable(const CallableOptions& callable_options,
@@ -1867,7 +1884,7 @@ Status DirectSession::MakeCallable(const CallableOptions& callable_options,
     *out_handle = next_callable_handle_++;
     callables_[*out_handle] = {std::move(ek), std::move(func_info)};
   }
-  return Status::OK();
+  return OkStatus();
 }
 
 class DirectSession::RunCallableCallFrame : public CallFrameInterface {
@@ -1894,7 +1911,7 @@ class DirectSession::RunCallableCallFrame : public CallFrameInterface {
     } else {
       *val = &(*feed_tensors_)[index];
     }
-    return Status::OK();
+    return OkStatus();
   }
 
   Status SetRetval(int index, const Tensor& val) override {
@@ -1902,7 +1919,7 @@ class DirectSession::RunCallableCallFrame : public CallFrameInterface {
       return errors::Internal("RetVal index out of bounds: ", index);
     }
     (*fetch_tensors_)[index] = val;
-    return Status::OK();
+    return OkStatus();
   }
 
  private:
@@ -1976,7 +1993,7 @@ class DirectSession::RunCallableCallFrame : public CallFrameInterface {
   const std::vector<Tensor>* actual_feed_tensors;
 
   if (TF_PREDICT_FALSE(any_resource_feeds)) {
-    converted_feed_tensors = absl::make_unique<std::vector<Tensor>>();
+    converted_feed_tensors = std::make_unique<std::vector<Tensor>>();
     converted_feed_tensors->reserve(feed_tensors.size());
     for (const Tensor& t : feed_tensors) {
       if (t.dtype() == DT_RESOURCE) {
@@ -2013,7 +2030,7 @@ class DirectSession::RunCallableCallFrame : public CallFrameInterface {
     metrics::RecordGraphOutputTensors(output_size);
   }
 
-  return Status::OK();
+  return OkStatus();
 }
 
 ::tensorflow::Status DirectSession::ReleaseCallable(CallableHandle handle) {
@@ -2022,7 +2039,7 @@ class DirectSession::RunCallableCallFrame : public CallFrameInterface {
     return errors::InvalidArgument("No such callable handle: ", handle);
   }
   callables_.erase(handle);
-  return Status::OK();
+  return OkStatus();
 }
 
 Status DirectSession::Finalize() {
@@ -2036,7 +2053,7 @@ Status DirectSession::Finalize() {
   execution_state_.reset();
   flib_def_.reset();
   finalized_ = true;
-  return Status::OK();
+  return OkStatus();
 }
 
 DirectSession::Callable::~Callable() {

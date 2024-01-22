@@ -34,8 +34,8 @@ limitations under the License.
 #include "tensorflow/compiler/xla/tests/literal_test_util.h"
 #include "tensorflow/compiler/xla/tests/test_macros.h"
 #include "tensorflow/compiler/xla/xla_data.pb.h"
-#include "tensorflow/core/platform/tensor_float_32_utils.h"
-#include "tensorflow/core/platform/test.h"
+#include "tensorflow/tsl/platform/tensor_float_32_utils.h"
+#include "tensorflow/tsl/platform/test.h"
 
 namespace xla {
 namespace {
@@ -49,6 +49,17 @@ class ConvolutionVariantsTest : public ClientLibraryTestBase {
 #else
   ErrorSpec error_spec_ = ErrorSpec(1e-4, 1e-2);
 #endif
+
+  void SetUp() override {
+    init_tf32_status_ = tsl::tensor_float_32_execution_enabled();
+    tsl::enable_tensor_float_32_execution(false);
+  }
+  void TearDown() override {
+    tsl::enable_tensor_float_32_execution(init_tf32_status_);
+  }
+
+ private:
+  bool init_tf32_status_;
 };
 
 XLA_TEST_F(ConvolutionVariantsTest, Minimal) {
@@ -563,8 +574,6 @@ XLA_TEST_F(ConvolutionVariantsTest, Filter2x2x8x8Input2x2x8x8) {
 
 XLA_TEST_F(ConvolutionVariantsTest, Filter2x2x8x8Input32x2x8x8) {
   XlaBuilder builder(TestName());
-  bool tf32_before = tensorflow::tensor_float_32_execution_enabled();
-  tensorflow::enable_tensor_float_32_execution(false);
 
   std::vector<float> input_data(32 * 2 * 8 * 8);
   std::iota(input_data.begin(), input_data.end(), 0.0);
@@ -601,13 +610,10 @@ XLA_TEST_F(ConvolutionVariantsTest, Filter2x2x8x8Input32x2x8x8) {
   // The output elements can be larger than 1e+5, making the absolute error
   // large sometimes. So, we focus on relative errors for this test case.
   ComputeAndCompareR4<float>(&builder, expected, {}, error_spec_);
-  tensorflow::enable_tensor_float_32_execution(tf32_before);
 }
 
 XLA_TEST_F(ConvolutionVariantsTest, Filter16x16x1x1Input16x16x1x1) {
   XlaBuilder builder(TestName());
-  bool tf32_before = tensorflow::tensor_float_32_execution_enabled();
-  tensorflow::enable_tensor_float_32_execution(false);
 
   Array4D<float> input_array(16, 16, 1, 1);
   Array4D<float> filter_array(16, 16, 1, 1);
@@ -630,7 +636,6 @@ XLA_TEST_F(ConvolutionVariantsTest, Filter16x16x1x1Input16x16x1x1) {
   }
 
   ComputeAndCompareR4<float>(&builder, expected, {}, error_spec_);
-  tensorflow::enable_tensor_float_32_execution(tf32_before);
 }
 
 XLA_TEST_F(ConvolutionVariantsTest, FlatRhsDilation) {
@@ -1340,18 +1345,15 @@ XLA_TEST_F(ConvolutionVariantsTest, BackwardInputEvenPadding3D) {
   XlaBuilder builder(TestName());
 
   auto gradients_flat = LiteralUtil::CreateR1<float>({1});
-  auto gradients_literal =
-      gradients_flat.Reshape({1, 1, 1, 1, 1}).ConsumeValueOrDie();
+  auto gradients_literal = gradients_flat.Reshape({1, 1, 1, 1, 1}).value();
   auto gradients = ConstantLiteral(&builder, gradients_literal);
 
   auto weights_flat = LiteralUtil::CreateR1<float>({1, 10, 100});
-  auto weights_literal =
-      weights_flat.Reshape({1, 1, 1, 1, 3}).ConsumeValueOrDie();
+  auto weights_literal = weights_flat.Reshape({1, 1, 1, 1, 3}).value();
   auto weights = ConstantLiteral(&builder, weights_literal);
 
   auto expected_flat = LiteralUtil::CreateR1<float>({10});
-  auto expected_literal =
-      expected_flat.Reshape({1, 1, 1, 1, 1}).ConsumeValueOrDie();
+  auto expected_literal = expected_flat.Reshape({1, 1, 1, 1, 1}).value();
 
   auto mirrored_weights = Rev(weights, {2, 3, 4});
   ConvWithGeneralPadding(gradients, mirrored_weights,
@@ -1364,18 +1366,15 @@ XLA_TEST_F(ConvolutionVariantsTest, BackwardFilterEvenPadding3D) {
   XlaBuilder builder(TestName());
 
   auto activations_flat = LiteralUtil::CreateR1<float>({1, 2, 3, 4});
-  auto activations_literal =
-      activations_flat.Reshape({1, 1, 1, 1, 4}).ConsumeValueOrDie();
+  auto activations_literal = activations_flat.Reshape({1, 1, 1, 1, 4}).value();
   auto activations = ConstantLiteral(&builder, activations_literal);
 
   auto gradients_flat = LiteralUtil::CreateR1<float>({100, 10, 1});
-  auto gradients_literal =
-      gradients_flat.Reshape({1, 1, 1, 1, 3}).ConsumeValueOrDie();
+  auto gradients_literal = gradients_flat.Reshape({1, 1, 1, 1, 3}).value();
   auto gradients = ConstantLiteral(&builder, gradients_literal);
 
   auto expected_flat = LiteralUtil::CreateR1<float>({13, 24, 130});
-  auto expected_literal =
-      expected_flat.Reshape({1, 1, 1, 1, 3}).ConsumeValueOrDie();
+  auto expected_literal = expected_flat.Reshape({1, 1, 1, 1, 3}).value();
 
   auto forward_conv =
       ConvGeneralDilated(activations, gradients,

@@ -17,10 +17,10 @@ limitations under the License.
 
 #define EIGEN_USE_THREADS
 
-#if defined(__ARM_NEON__) || defined(__ARM_NEON)
-#define USE_NEON
-#include <arm_neon.h>
-#endif
+//#if defined(__ARM_NEON__) || defined(__ARM_NEON)
+//#define USE_NEON
+//#include <arm_neon.h>
+//#endif
 
 #include "tensorflow/core/framework/op_kernel.h"
 #include "tensorflow/core/framework/tensor.h"

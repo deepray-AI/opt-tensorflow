@@ -1,7 +1,6 @@
 load(":build_defs.bzl", "cuda_header_library")
 load("@bazel_skylib//:bzl_library.bzl", "bzl_library")
 load("@bazel_skylib//lib:selects.bzl", "selects")
-load("@local_config_cuda//cuda:build_defs.bzl", "if_cuda_cutensor")
 
 licenses(["restricted"])  # MPL2, portions GPL v3, LGPL v3, BSD-like
 
@@ -16,14 +15,6 @@ selects.config_setting_group(
     match_all = [
         "@local_config_cuda//:is_cuda_enabled",
         "@local_config_cuda//:is_cuda_compiler_clang",
-    ],
-)
-
-selects.config_setting_group(
-    name = "using_cutensor",
-    match_all = [
-        "@local_config_cuda//:is_cuda_enabled",
-        "@local_config_cuda//:is_cutensor_enabled",
     ],
 )
 
@@ -136,15 +127,6 @@ cuda_header_library(
     deps = [":cuda_headers"],
 )
 
-cuda_header_library(
-    name = "cutensor_headers",
-    hdrs = [":cutensor-include"],
-    include_prefix = "third_party/gpus/cuda/include",
-    includes = ["cutensor/include"],
-    strip_include_prefix = "cutensor/include",
-    deps = [":cuda_headers"],
-)
-
 cc_library(
     name = "cublas",
     srcs = ["cuda/lib/%{cublas_lib}"],
@@ -197,13 +179,6 @@ cc_library(
 )
 
 cc_library(
-    name = "cutensor",
-    srcs = if_cuda_cutensor(["cuda/lib/%{cutensor_lib}"]),
-    data = if_cuda_cutensor(["cuda/lib/%{cutensor_lib}"]),
-    linkstatic = 1,
-)
-
-cc_library(
     name = "cuda",
     deps = [
         ":cublas",
@@ -212,7 +187,8 @@ cc_library(
         ":cudart",
         ":cudnn",
         ":cufft",
-        ":curand",],
+        ":curand",
+    ],
 )
 
 alias(

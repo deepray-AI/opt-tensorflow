@@ -229,12 +229,13 @@ def InvokeNvcc(argv, log=False):
   nvccopts = '-D_FORCE_INLINES '
   capabilities_sm = set(GetOptionValue(argv, "--cuda-gpu-arch"))
   capabilities_compute = set(GetOptionValue(argv, '--cuda-include-ptx'))
+  # When both "code=sm_xy" and "code=compute_xy" are requested for a single
+  # arch, they can be combined using "code=xy,compute_xy" which avoids a
+  # redundant PTX generation during compilation.
   capabilities_both = capabilities_sm.intersection(capabilities_compute)
-  # When both sm_xy and compute_xy are requested for a single arch, it is more
-  # efficient to generate PTX once then store as both PTX and cubin/sass.
   for capability in capabilities_both:
     capability = capability[len('sm_'):]
-    nvccopts += r'-gencode=arch=compute_%s,\"code=sm_%s,compute_%s\" ' % (
+    nvccopts += r'-gencode=arch=compute_%s,code=\"sm_%s,compute_%s\" ' % (
         capability, capability, capability)
   for capability in capabilities_sm - capabilities_both:
     capability = capability[len('sm_'):]
@@ -250,6 +251,8 @@ def InvokeNvcc(argv, log=False):
   nvccopts += std_options
   nvccopts += m_options
   nvccopts += warning_options
+  # Force C++17 dialect (note, everything in just one string!)
+  nvccopts += ' --std c++17 '
   nvccopts += fatbin_options
   ccache = ''
   if CCACHE:

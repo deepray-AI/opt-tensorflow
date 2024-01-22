@@ -12,4 +12,6 @@
 *PyInit_*
 *SE_*
 *SP_*
+*tsl*
 *lite*
+*TFL*

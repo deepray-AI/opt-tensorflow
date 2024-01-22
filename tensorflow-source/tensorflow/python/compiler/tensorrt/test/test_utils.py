@@ -17,26 +17,6 @@
 import os
 
 from contextlib import contextmanager
-from functools import wraps
-
-from tensorflow.python.compiler.tensorrt.test import tf_trt_integration_test_base as trt_test
-
-
-def disable_tf32_testing(_class):
-  """Force Tensorflow to use FP32 instead of TensorFloat-32 computation.
-
-  This helper decorator helps to avoid some false negative tests due to
-  TF32 requiring sometimes slightly higher tolerances to pass."""
-
-  if not issubclass(_class, trt_test.TfTrtIntegrationTestBase):
-    raise ValueError("Can only decorate a `TfTrtIntegrationTestBase` test.")
-
-  @wraps(_class.ShouldAllowTF32Computation)
-  def _should_allow_tf32_testing(self, *args ,**kwargs):
-    return False
-
-  _class.ShouldAllowTF32Computation = _should_allow_tf32_testing
-  return _class
 
 
 @contextmanager

@@ -15,6 +15,7 @@
 """Tests for Grappler AutoMixedPrecision."""
 
 import os
+import re
 
 from absl.testing import parameterized
 import numpy as np
@@ -33,7 +34,6 @@ from tensorflow.python.framework import random_seed
 from tensorflow.python.framework import test_util
 from tensorflow.python.layers import layers
 from tensorflow.python.ops import array_ops
-from tensorflow.python.ops import control_flow_ops
 from tensorflow.python.ops import gradients
 from tensorflow.python.ops import init_ops
 from tensorflow.python.ops import math_ops
@@ -42,8 +42,9 @@ from tensorflow.python.ops import nn_impl
 from tensorflow.python.ops import random_ops
 from tensorflow.python.ops import tensor_array_ops
 from tensorflow.python.ops import variables
+from tensorflow.python.ops import while_loop
 from tensorflow.python.ops.losses import losses
-from tensorflow.python.platform import sysconfig
+from tensorflow.python.platform import sysconfig as sysconfig_lib
 from tensorflow.python.platform import test
 from tensorflow.python.training import adam
 from tensorflow.python.training import gradient_descent
@@ -148,7 +149,7 @@ def _simple_loop(x, functor):
   init = (constant_op.constant(0), x)
   c = lambda i, j: i < 4
   b = lambda i, j: (i + 1, functor(j))
-  ij = control_flow_ops.while_loop(c, b, init)
+  ij = while_loop.while_loop(c, b, init)
   return ij
 
 
@@ -157,7 +158,7 @@ def _loop_vars_intertwined(x0, y0, functor_x, functor_y):
   c = lambda i, j, x, y: j < 4
   b = lambda i, j, x, y: (j + 1, i + 1, functor_y(y), functor_x(x))
   init = (constant_op.constant(0), constant_op.constant(0), x0, y0)
-  ijzw = control_flow_ops.while_loop(c, b, init)
+  ijzw = while_loop.while_loop(c, b, init)
   return ijzw
 
 
@@ -199,7 +200,7 @@ def _recurrent_lstm(c, h):
     ta_x = ta_x.write(
         i, constant_op.constant(0.1, shape=[8, 4], dtype=dtypes.float32))
   init = (constant_op.constant(0), c, h, ta_x)
-  r = control_flow_ops.while_loop(cond, body, init)
+  r = while_loop.while_loop(cond, body, init)
   return r
 
 
@@ -247,7 +248,7 @@ def _get_config(auto_mixed_precision_mode):
   if auto_mixed_precision_mode == 'cuda':
     rewrite_config.auto_mixed_precision = rewriter_config_pb2.RewriterConfig.ON
   elif auto_mixed_precision_mode == 'mkl':
-    rewrite_config.auto_mixed_precision_mkl = (
+    rewrite_config.auto_mixed_precision_onednn_bfloat16 = (
         rewriter_config_pb2.RewriterConfig.ON)
   else:
     assert auto_mixed_precision_mode is None
@@ -268,15 +269,15 @@ def _get_device(auto_mixed_precision_mode):
 
 
 def _is_cast_to_fp16(node_name, node_op):
-  return node_name.endswith('-CastToFp16-AutoMixedPrecision') and node_op == "Cast"
+  return re.match('.*-CastToFp16-[0-9]-AutoMixedPrecision$', node_name) and node_op == "Cast"
 
 
 def _is_cast_to_bf16(node_name, node_op):
-  return node_name.endswith('-CastToBf16-AutoMixedPrecision') and node_op == "Cast"
+  return re.match('.*-CastToBf16-[0-9]-AutoMixedPrecision$', node_name) and node_op == "Cast"
 
 
 def _is_cast_to_fp32(node_name, node_op):
-  return node_name.endswith('-CastToFp32-AutoMixedPrecision') and node_op == "Cast"
+  return re.match('.*-CastToFp32-[0-9]-AutoMixedPrecision$', node_name) and node_op == "Cast"
 
 
 def _count_casts(mode, partition_graph):
@@ -599,7 +600,8 @@ class AutoMixedPrecisionTest(test.TestCase, parameterized.TestCase):
   def test_depthwise_conv2d(self, mode):
     """Test grad ops with depthwise convolution2d graph."""
     self._maybe_skip(mode)
-    cudnn_version_str = sysconfig.get_build_info().get('cudnn_version', '0.0')
+    cudnn_version_str = sysconfig_lib.get_build_info().get(
+        'cudnn_version', '0.0')
     cudnn_version = tuple([int(x) for x in cudnn_version_str.split('.')])
     if cudnn_version < (8,):
       # Depthwise conv2d ops are only enabled in auto_mixed_precision as of
@@ -704,7 +706,8 @@ class AutoMixedPrecisionTest(test.TestCase, parameterized.TestCase):
       self._assert_output_f16(mode, node_map, 'Relu' + suffix)
       self._assert_output_f16(mode, node_map, 'MaxPool' + suffix)
     self._assert_output_f16(mode, node_map, 'concat')
-    self.assertAllClose(output_val_ref, output_val, atol=1e-3, rtol=1e-3)
+    atol = 1e-2 if test.is_built_with_rocm() else 1e-3
+    self.assertAllClose(output_val_ref, output_val, atol=atol, rtol=1e-3)
 
   @parameterized.parameters(['cuda', 'mkl'])
   @test_util.run_deprecated_v1
@@ -735,7 +738,7 @@ class AutoMixedPrecisionTest(test.TestCase, parameterized.TestCase):
       # Bump up the tolerance for the ROCm platform
       # The default tolerance (1e-3) results in a tiny fraction (<1%) of
       # miscompares on ROCm platform, and hence the tolerance bump
-      tol = 2e-3
+      tol = 1e-2
     else:
       tol = 1e-3
     self.assertAllClose(output_val_ref, output_val, atol=tol, rtol=tol)
@@ -843,7 +846,8 @@ class AutoMixedPrecisionTest(test.TestCase, parameterized.TestCase):
 
     self._assert_output_f16(mode, node_map, 'MatMul')
     tol = 1e-2 if mode == 'mkl' else 1e-3
-    self.assertAllClose(output_val_ref, output_val, atol=tol, rtol=tol)
+    atol = 1e-2 if test.is_built_with_rocm() else tol
+    self.assertAllClose(output_val_ref, output_val, atol=atol, rtol=tol)
 
   @parameterized.parameters(['cuda', 'mkl'])
   @test_util.run_deprecated_v1
@@ -886,8 +890,8 @@ class AutoMixedPrecisionTest(test.TestCase, parameterized.TestCase):
         return loss, i
 
       begin, end = constant_op.constant(0), constant_op.constant(num_iter)
-      loss, _ = control_flow_ops.while_loop(
-          lambda loss, i: math_ops.less(i, end), body, [0.0, begin])
+      loss, _ = while_loop.while_loop(lambda loss, i: math_ops.less(i, end),
+                                      body, [0.0, begin])
 
     output_val_ref, output_val, cost_graph, _ = self._run(mode, loss)
     node_map = _build_node_map(cost_graph.node)

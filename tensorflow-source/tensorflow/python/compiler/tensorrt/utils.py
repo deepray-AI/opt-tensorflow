@@ -264,7 +264,7 @@ def draw_graphdef_as_graphviz(graphdef, dot_output_filename):
 
 
 @functools.lru_cache
-def get_nvidia_gpu_desc_dict():
+def _get_nvidia_gpu_desc_dict():
 
   try:
     all_devices = device_lib.list_local_devices()
@@ -280,9 +280,9 @@ def get_nvidia_gpu_desc_dict():
         continue
 
       local_devices.append({
-      	"name": device.name,
-      	"device": device.physical_device_desc,
-      	"compute_capability": ".".join([str(s) for s in cc])
+        "name": device.name,
+        "device": device.physical_device_desc,
+        "compute_capability": ".".join([str(s) for s in cc])
       })
 
     return sorted(local_devices, key=lambda x: x["name"], reverse=False)
@@ -298,42 +298,58 @@ def get_nvidia_gpu_desc_dict():
 
 @functools.lru_cache
 def is_platform_supported(precision, gpu_id=0):
-    """ This function determines if the current NVIDIA GPU platform supports the
-    requested TensorRT compute precision.
+  """If a TensorRT compute precision is supported by the current machine.
 
-    Required Compute Capabilities:
-    - FP16 = 5.3 || 6.0 || 6.2 || 7.0+
-    - INT8 = 6.1 || 7.0 || 7.2+
-    """
-    from tensorflow.python.compiler.tensorrt.trt_convert import TrtPrecisionMode
+  This function determines if the current NVIDIA GPU platform supports the
+  requested TensorRT compute precision. FP16 and INT8 precisions are only
+  supported on some GPUs, depending on the device's compute capability.
 
-    gpu_cc = Version(get_nvidia_gpu_desc_dict()[0]["compute_capability"])
+  Required Compute Capabilities:
+  - FP16 = 5.3 || 6.0 || 6.2 || 7.0+
+  - INT8 = 6.1 || 7.0 || 7.2+
 
-    if precision == TrtPrecisionMode.FP32:
+  Args:
+    precision: one of the strings in
+      TrtPrecisionMode.supported_precision_modes().
+    gpu_id: the index of the GPU that should be checked.
+
+  Raises:
+      ValueError: if the requested precision mode is unknown.
+      IndexError: if there is no GPU at the requested index.
+
+  Returns:
+      A (bool, str) tuple indicating if the precision is supported by the GPU,
+      and if not, the reason why.
+  """
+  from tensorflow.python.compiler.tensorrt.trt_convert import TrtPrecisionMode
+
+  gpu_cc = Version(_get_nvidia_gpu_desc_dict()[gpu_id]["compute_capability"])
+
+  if precision == TrtPrecisionMode.FP32:
+    return True, ""
+
+  elif precision == TrtPrecisionMode.FP16:
+    if (
+      gpu_cc == Version("5.3") or
+      gpu_cc == Version("6.0") or
+      gpu_cc == Version("6.2") or
+      gpu_cc >= Version("7.0")):
       return True, ""
 
-    elif precision == TrtPrecisionMode.FP16:
-      if (
-        gpu_cc == Version("5.3") or
-        gpu_cc == Version("6.0") or
-        gpu_cc == Version("6.2") or
-        gpu_cc >= Version("7.0")):
-        return True, ""
+  elif precision == TrtPrecisionMode.INT8:
+    if (
+      gpu_cc == Version("6.1") or
+      gpu_cc == Version("7.0") or
+      gpu_cc >= Version("7.2")):
+      return True, ""
 
-    elif precision == TrtPrecisionMode.INT8:
-      if (
-        gpu_cc == Version("6.1") or
-        gpu_cc == Version("7.0") or
-        gpu_cc >= Version("7.2")):
-        return True, ""
+  else:
+    raise ValueError(f"Unknown Precision Received: {precision}")
 
-    else:
-      raise ValueError(f"Unknown Precision Received: {precision}")
-
-    return False, (
-      "Platform does not support the requested TensorRTcompute precision: "
-      f"{precision}.\n"
-      "Required Compute Capabilities:\n"
-      "- FP16 = 5.3 || 6.0 || 6.2 || 7.0+\n"
-      "- INT8 = 6.1 || 7.0 || 7.2+"
-    )
+  return False, (
+    "Platform does not support the requested TensorRTcompute precision: "
+    f"{precision}.\n"
+    "Required Compute Capabilities:\n"
+    "- FP16 = 5.3 || 6.0 || 6.2 || 7.0+\n"
+    "- INT8 = 6.1 || 7.0 || 7.2+"
+  )

@@ -1,7 +1,14 @@
 # cuDNN Frontend API
 
 ## Introduction
-The cuDNN Frontend API is a C++ header-only library that demonstrates how to use the cuDNN C backend API. The cuDNN C backend API is documented in the [cuDNN developer guide](https://docs.nvidia.com/deeplearning/cudnn/developer-guide/index.html). 
+The cuDNN frontend API is a C++ header-only library that wraps the [cuDNN C backend API](https://docs.nvidia.com/deeplearning/cudnn/api/index.html#cudnn-backend-api). Both the frontend and backend APIs are entry points to the same set of functionality that we commonly refer to as the "[graph API](https://docs.nvidia.com/deeplearning/cudnn/developer-guide/index.html#op-fusion)".
+
+While there are two entry points to the graph API (i.e. backend and frontend), we expect that most users will use the frontend entry point because:
+
+- It is less verbose without loss of control. All functionality accessible through the backend API is also accessible through the frontend API.
+- It adds functionality on top of the backend API, like errata filters and autotuning.
+
+Also, for those who want to use the backend API, the frontend source can serve as a reference implementation.
 
 ## Usage
 In order to include the entire library, include the cudnn_frontend header file `cudnn_frontend.h` into your compilation unit.
@@ -44,18 +51,19 @@ Samples of runtime fusion are added in `samples/test_list.cpp` and `samples/fusi
 Sample tests are written using the [Catch2](https://github.com/catchorg/Catch2) C++ test framework.
 
 ### How to build samples:
-     - CUDA_PATH has the cuda installation. 
-        - Include files are in CUDA_PATH/include
-        - Link files are in CUDA_PATH/lib64
-     - CUDNN_FRONTEND_PATH has the cudnn frontend header files.
+     - Provide CUDA according to: https://cmake.org/cmake/help/latest/module/FindCUDAToolkit.html
      - CUDNN_PATH has the cudnn installation.
-        - Include files are in CUDNN_PATH/include
-        - Link files are in CUDNN_PATH/lib or CUDNN_PATH/lib64
+        - Headers are in CUDNN_PATH/include
+        - Libraries are in CUDNN_PATH/lib or CUDNN_PATH/lib64 or CUDNN_PATH/lib/x64
+
+     From Project Root,
 
      mkdir build; cd build
-     cmake ..
-     make
-     ./Samples
+     cmake -DCUDNN_PATH=/path/to/cudnn -DCUDAToolkit_ROOT=/path/to/cuda  ../
+     cmake --build . -j16
+     bin/samples
+
+     - You can skip building samples by providing CUDNN_FRONTEND_BUILD_SAMPLES=0 to the cmake.
     
 ## cudnnFindPlan and cudnnGetPlan:
 Prior to cuDNN V8, cuDNN provided `cudnnFindConvolution*` and `cudnnGetConvolution*` functions, which provided a way to sample all the algorithms for a given problem and study the run times. This can be further used to cache the best algorithms for a given problem.  In cuDNN V8, this has been replaced with `cudnnFindPlan` and `cudnnGetPlan`.
@@ -80,6 +88,9 @@ Errata filter gives the cuDNN team an opportunity to block certain faulty kernel
     operation           : ""   - Mandatory. Stringified version of the operation graph.
     engine              : ""   - Mandatory. Stringified version of the engine ID.
     knob                : ""   - Optional.  Stringified version of the knob. If specified only the engineConfig for the engine matching the knobs will be blocked. Else, all possible combination of knobs for the engine will be blocked.
+    input_shape         : []   - Optional. Array of input shape for kernel (ex. [64, 32, 128, 128]) to be filtered out. Use -1 if you don't want to filter that dimension. (ex. [-1, -1, 128, 128] to only filter HxW for NCHW format)
+    filter_shape        : []   - Optional. Array of kernel/filter shape for kernel (ex. [32, 32, 5, 5]) to be filtered out. Use -1 if you don't want to filter that dimension. (ex. [-1, -1, 5, 5] to only filter 5x5 filter sizes)
+    shape_format        : ""   - Mandatory if input_shape and/or kernel_shape is present. Optional otherwise. Shape format of tensors as a string. (Ex. "NCHW", "NHWC").
     cudnn_version_start : 0    - Optional. Denotes the cudnn version after which the engine started having issues.
     cudnn_version_end   : -1   - Optional. Denotes the cudnn_version when the issue was fixed. "-1" denotes its an ongoing issue.
     arch                : ""   - Optional. Architectures where this kernel might be faulty.
@@ -121,6 +132,9 @@ Calling `cudnn_frontend::getStream() = stream_name` can be used to assign the ou
 
 ## Documentation
 Documentation can be found at https://nvidia.github.io/cudnn-frontend/
+
+## Contributing:
+At this point we are not accepting any external PRs. Please create an issue in github and we will get to it.
 
 ## Feedback
 Support, resources, and information about cuDNN can be found online at https://developer.nvidia.com/cudnn. 

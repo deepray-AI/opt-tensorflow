@@ -15,19 +15,15 @@ limitations under the License.
 #ifndef TENSORFLOW_CORE_UTIL_EINSUM_OP_UTIL_H_
 #define TENSORFLOW_CORE_UTIL_EINSUM_OP_UTIL_H_
 
-#include "absl/container/flat_hash_map.h"
 #include "tensorflow/core/lib/core/status.h"
 #include "tensorflow/core/lib/gtl/inlined_vector.h"
 
 namespace tensorflow {
 
-using ShapeVec = gtl::InlinedVector<int64_t, 8>;
 using Labels = gtl::InlinedVector<int, 8>;
 using OperandLabels = gtl::InlinedVector<Labels, 2>;
 using LabelCounts = gtl::InlinedVector<int, 8>;
 using OperandLabelCounts = gtl::InlinedVector<LabelCounts, 2>;
-using LabelToDimSizes = gtl::InlinedVector<int64_t, 8>;
-
 
 // Dummy axis label used to denote an ellipsis in an input or output subscript.
 constexpr int kEllipsisLabel = -1;
@@ -70,13 +66,6 @@ Status ParseEinsumEquation(const string& equation, OperandLabels* input_labels,
                            gtl::InlinedVector<bool, 2>* input_has_ellipsis,
                            bool* output_has_ellipsis);
 
-void MapToLabels(const string& subscript, Labels* labels,
-                 absl::flat_hash_map<char, int>* label_mapping);
-
-EinsumDimensionType GetDimensionType(bool is_removed, bool is_unique);                 
-
-// Query env var TF_ENABLE_CUTENSOR_EINSUM.
-bool EnableCuTensorEinsum();
 }  // namespace tensorflow
 
 #endif  // TENSORFLOW_CORE_UTIL_EINSUM_OP_UTIL_H_

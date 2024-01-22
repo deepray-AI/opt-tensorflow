@@ -321,7 +321,7 @@ class GraphViewInternal {
   Status AddUniqueNode(NodeDefT* node) {
     auto inserted = nodes_.emplace(node->name(), node);
     return inserted.second
-               ? Status::OK()
+               ? OkStatus()
                : errors::InvalidArgument("Non unique node name detected: ",
                                          node->name());
   }
@@ -329,7 +329,7 @@ class GraphViewInternal {
   // TODO(ezhulenev): Remove this function.
   void AddUniqueNodeOrDie(NodeDefT* node) {
     Status st = AddUniqueNode(node);
-    CHECK(st.ok()) << st.error_message();
+    CHECK(st.ok()) << st.message();
   }
 
   // TODO(lyandy): Checks for self loops, Switch control dependencies, fanins

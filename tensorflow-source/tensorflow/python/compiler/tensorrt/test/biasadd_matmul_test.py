@@ -17,7 +17,6 @@
 import numpy as np
 
 from tensorflow.python.compiler.tensorrt.test import tf_trt_integration_test_base as trt_test
-from tensorflow.python.compiler.tensorrt.test import test_utils as trt_test_utils
 from tensorflow.python.framework import constant_op
 from tensorflow.python.framework import dtypes
 from tensorflow.python.ops import array_ops
@@ -27,7 +26,6 @@ from tensorflow.python.ops import nn
 from tensorflow.python.platform import test
 
 
-@trt_test_utils.disable_tf32_testing
 class BiasaddMatMulTest(trt_test.TfTrtIntegrationTestBase):
   """Testing conversion of BiasAdd MatMul in TF-TRT conversion."""
 

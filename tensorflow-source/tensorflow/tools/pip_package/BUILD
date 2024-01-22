@@ -5,7 +5,7 @@ load("//tensorflow:tensorflow.bzl", "filegroup_as_file", "if_windows", "transiti
 load("//third_party/mkl:build_defs.bzl", "if_enable_mkl", "if_mkl", "if_mkl_ml")
 load("@local_config_cuda//cuda:build_defs.bzl", "if_cuda")
 load("@local_config_syslibs//:build_defs.bzl", "if_not_system_lib")
-load("//tensorflow/core/platform:build_config_root.bzl", "tf_additional_license_deps", "if_dynamic_pywrap")
+load("//tensorflow/core/platform:build_config_root.bzl", "tf_additional_license_deps")
 
 package(default_visibility = ["//visibility:private"])
 
@@ -43,7 +43,7 @@ transitive_hdrs(
         "//tensorflow/c/experimental/grappler:grappler_hdrs",
         "//tensorflow/c:kernels_hdrs",
         "//tensorflow/c:ops_hdrs",
-        # TODO(mihaimaruseac): Revisit these after cc_shared_library everywhere
+        # TODO(rostam): Revisit these after cc_shared_library everywhere
         "//tensorflow/cc:client_session",
         "//tensorflow/cc:cc_ops",
         # WARNING: None of the C/C++ code under python/ has any API guarantees, and TF team
@@ -66,6 +66,7 @@ transitive_hdrs(
         "//tensorflow/python/framework:python_op_gen",
         "//tensorflow/python/client:tf_session_helper",
         "//third_party/eigen3",
+        "//tensorflow/compiler/xla/stream_executor:stream_executor_headers",
     ] + if_cuda([
         "@local_config_cuda//cuda:cuda_headers",
     ]),
@@ -104,14 +105,22 @@ COMMON_PIP_DEPS = [
     "//tensorflow/compiler/tf2xla:xla_compiled_cpu_runtime_hdrs",
     "//tensorflow/compiler/tf2xla:xla_compiled_cpu_runtime_srcs",
     "//tensorflow/compiler/mlir/tensorflow:gen_mlir_passthrough_op_py",
+    "//tensorflow/core/function/trace_type:serialization_test_proto_py",
+    "//tensorflow/core/function/trace_type:serialization",
     "//tensorflow/core:protos_all_proto_srcs",
+    "//tensorflow/dtensor/python/tests:test_util",
     "//tensorflow/lite/python:tflite_convert",
     "//tensorflow/lite/toco/python:toco_from_protos",
     "//tensorflow/lite/tools:visualize",
+    "//tensorflow/python/autograph/converters:list_comprehensions",
     "//tensorflow/python/autograph/core:test_lib",
     "//tensorflow/python/autograph/impl/testing:pybind_for_testing",
-    "//tensorflow/python/autograph/pyct/testing",
+    "//tensorflow/python/autograph/pyct/testing:basic_definitions",
+    "//tensorflow/python/autograph/pyct/testing:decorators",
     "//tensorflow/python/autograph/pyct/common_transformers:common_transformers",
+    "//tensorflow/python/autograph/pyct/static_analysis:type_inference",
+    "//tensorflow/python/autograph/utils:context_managers",
+    "//tensorflow/python/autograph/utils:tensor_list",
     "//tensorflow/python/compiler:compiler",
     "//tensorflow/python:cond_v2",
     "//tensorflow/python:distributed_framework_test_lib",
@@ -130,28 +139,42 @@ COMMON_PIP_DEPS = [
     "//tensorflow/python/ops/ragged:ragged_tensor_test_ops",
     "//tensorflow/python/debug:debug_pip",
     "//tensorflow/python/distribute:combinations",
+    "//tensorflow/python/distribute/failure_handling:check_preemption_py",
     "//tensorflow/python/distribute/failure_handling:failure_handling_lib",
-    "//tensorflow/python/distribute/failure_handling:gce_util",
+    "//tensorflow/python/distribute/failure_handling:failure_handling_util",
     "//tensorflow/python/distribute:multi_process_runner",
     "//tensorflow/python/eager:eager_pip",
     "//tensorflow/python/keras:combinations",
-    "//tensorflow/python/keras/distribute:distribute_test_lib_pip",
-    "//tensorflow/python/keras/distribute:strategy_combinations",
     "//tensorflow/python/keras/mixed_precision:test_util",
     "//tensorflow/python/keras/utils:dataset_creator",
     "//tensorflow/python/kernel_tests/linalg/testdata:self_adjoint_eig_op_test_files",
     "//tensorflow/python/kernel_tests/nn_ops:bias_op_base",
     "//tensorflow/python/kernel_tests/nn_ops:cudnn_deterministic_base",
+    "//tensorflow/python/kernel_tests/nn_ops:depthwise_conv_op_base",
     "//tensorflow/python/kernel_tests/nn_ops:xent_op_test_base",
     "//tensorflow/python/kernel_tests/random:util",
     "//tensorflow/python/kernel_tests/signal:test_util",
     "//tensorflow/python/kernel_tests/sparse_ops:sparse_xent_op_test_base",
+    "//tensorflow/python/lib:__init__",
+    "//tensorflow/python/ops/structured:structured_tensor_dynamic",
+    "//tensorflow/python/platform:resource_loader",
     "//tensorflow/python/profiler:trace",
     "//tensorflow/python/saved_model:saved_model",
+    "//tensorflow/python/summary:__init__",
+    "//tensorflow/python/summary:plugin_asset",
+    "//tensorflow/python/summary:summary_iterator",
+    "//tensorflow/python/summary:summary_py",
     "//tensorflow/python/tools:tools_pip",
     "//tensorflow/python/tools/api/generator:create_python_api",
     "//tensorflow/python/tpu",
+    "//tensorflow/python/util:deprecated_module",
+    "//tensorflow/python/util:deprecated_module_new",
     "//tensorflow/python/util:example_parser_configuration",
+    "//tensorflow/python/util:function_utils",
+    "//tensorflow/python/util:keyword_args",
+    "//tensorflow/python/util:lock_util",
+    "//tensorflow/python/util:module_wrapper",
+    "//tensorflow/python/util:serialization",
     "//tensorflow/python:image_grad_test_base",
     "//tensorflow/python:memory_checker",
     "//tensorflow/python:test_ops",
@@ -191,10 +214,8 @@ filegroup(
         "@FP16//:LICENSE",
         "@FXdiv//:LICENSE",
         "@XNNPACK//:LICENSE",
-        "@arm_neon_2_x86_sse//:LICENSE",
         "@astunparse_archive//:LICENSE",
         "@boringssl//:LICENSE",
-        "@clog//:LICENSE",
         "@com_google_absl//:LICENSE",
         "@com_google_protobuf//:LICENSE",
         "@com_googlesource_code_re2//:LICENSE",
@@ -216,9 +237,7 @@ filegroup(
         "@libjpeg_turbo//:LICENSE.md",
         "@llvm-project//llvm:LICENSE.TXT",
         "@llvm-project//mlir:LICENSE.TXT",
-        "@lmdb//:LICENSE",
         "@local_config_tensorrt//:LICENSE",
-        "@nasm//:LICENSE",
         "@nsync//:LICENSE",
         "@opt_einsum_archive//:LICENSE",
         "@pasta//:LICENSE",
@@ -228,32 +247,29 @@ filegroup(
         "@six_archive//:LICENSE",
         "@snappy//:COPYING",
         "@sobol_data//:LICENSE",
+        "@stablehlo//:LICENSE",
         "@tblib_archive//:LICENSE",
         "@termcolor_archive//:COPYING.txt",
+        "@tf_runtime//:LICENSE",
+        "@tf_runtime//third_party/llvm_derived:LICENSE",
         "@typing_extensions_archive//:LICENSE",
         "@zlib//:zlib.h",
     ] + select({
-        "//tensorflow:android": [],
-        "//tensorflow:ios": [],
-        "//tensorflow:linux_s390x": [],
-        "//tensorflow:windows": [],
-        "//conditions:default": [],
+        "//tensorflow:linux_aarch64": [],
+        "//conditions:default": [
+            "@arm_neon_2_x86_sse//:LICENSE",
+            "@nasm//:LICENSE",
+        ],
     }) + select({
         "//tensorflow:android": [],
         "//tensorflow:ios": [],
         "//tensorflow:linux_s390x": [],
         "//tensorflow:windows": [],
-        "//tensorflow:no_gcp_support": [],
         "//conditions:default": [
             "@com_github_googlecloudplatform_google_cloud_cpp//:LICENSE",
         ],
     }) + select({
-        "//tensorflow/core/kernels:xsmm": [
-            "@libxsmm_archive//:LICENSE.md",
-        ],
-        "//conditions:default": [],
-    }) + select({
-        "//tensorflow:with_numa_support": [
+        "//tensorflow/tsl:with_numa_support": [
             "@hwloc//:COPYING",
         ],
         "//conditions:default": [],
@@ -291,9 +307,8 @@ sh_binary(
            select({
                "//tensorflow:dynamic_loaded_kernels": DYNAMIC_LOADED_KERNELS,
                "//conditions:default": [],
-           }) + if_mkl_ml([
-               "//third_party/mkl:intel_binary_blob",
-           ]) + if_dynamic_pywrap(["//tensorflow:libtensorflow_cc.so.2"]),
+           }) + if_mkl_ml(["//third_party/mkl:intel_binary_blob"]),
+    visibility = ["//visibility:public"],
 )
 
 # A genrule for generating a marker file for the pip package on Windows

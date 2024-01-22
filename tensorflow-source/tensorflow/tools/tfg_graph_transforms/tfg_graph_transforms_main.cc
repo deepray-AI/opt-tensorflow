@@ -27,11 +27,14 @@ limitations under the License.
 #include "tensorflow/compiler/mlir/init_mlir.h"
 #include "tensorflow/compiler/mlir/tensorflow/dialect_registration.h"
 #include "tensorflow/compiler/mlir/tensorflow/utils/error_util.h"
-#include "tensorflow/core/ir/importexport/export.h"
-#include "tensorflow/core/ir/importexport/import.h"
+#include "tensorflow/core/framework/graph_debug_info.pb.h"
+#include "tensorflow/core/ir/importexport/graphdef_export.h"
+#include "tensorflow/core/ir/importexport/graphdef_import.h"
+#include "tensorflow/core/ir/importexport/savedmodel_export.h"
+#include "tensorflow/core/ir/importexport/savedmodel_import.h"
 #include "tensorflow/core/ir/ops.h"
+#include "tensorflow/core/ir/tf_op_registry.h"
 #include "tensorflow/core/platform/env.h"
-#include "tensorflow/core/protobuf/graph_debug_info.pb.h"
 #include "tensorflow/core/transforms/pass_registration.h"
 #include "tensorflow/tools/tfg_graph_transforms/utils.h"
 
@@ -91,13 +94,23 @@ bool CheckCLParams() {
 void RegisterDialects(mlir::DialectRegistry& registry) {
   // This potentially could be limited, for now keep all TF.
   mlir::RegisterAllTensorFlowDialects(registry);
+
+  // Register the TF op registry interface so that passes can query it.
+  registry.addExtension(
+      +[](mlir::MLIRContext* ctx, mlir::tfg::TFGraphDialect* dialect) {
+        dialect->addInterfaces<mlir::tfg::TensorFlowOpRegistryInterface>();
+      });
 }
 
 tensorflow::Status RunOptimizationPasses(
     const mlir::PassPipelineCLParser& passPipeline, mlir::ModuleOp module,
     mlir::MLIRContext* context) {
   mlir::PassManager pm(context);
-  mlir::applyPassManagerCLOptions(pm);
+  mlir::registerPassManagerCLOptions();
+  if (failed(mlir::applyPassManagerCLOptions(pm))) {
+    return tensorflow::errors::InvalidArgument(
+        "Could not initialize MLIR pass manager CL options");
+  }
 
   auto error_handler = [&](const llvm::Twine& msg) {
     emitError(mlir::UnknownLoc::get(pm.getContext())) << msg;
@@ -137,8 +150,7 @@ tensorflow::StatusOr<mlir::OwningOpRef<mlir::ModuleOp>> ImportModel(
       TF_RETURN_IF_ERROR(
           mlir::tfg::graph_transforms::ReadModelProto<tensorflow::GraphDef>(
               input_file, graph_def));
-      return mlir::tfg::ImportGraphDefToMlir(mlir_context, debug_info,
-                                             graph_def);
+      return mlir::tfg::ImportGraphDef(mlir_context, debug_info, graph_def);
     }
   }
 }
@@ -156,8 +168,8 @@ tensorflow::Status ExportTFGModule(mlir::ModuleOp module_op,
       tensorflow::SavedModel final_saved_model;
 
       TF_RETURN_WITH_CONTEXT_IF_ERROR(
-          tensorflow::ExportMlirToSavedModel(module_op, original_saved_model,
-                                             &final_saved_model),
+          mlir::tfg::ExportMlirToSavedModel(module_op, original_saved_model,
+                                            &final_saved_model),
           "while converting TFG to SavedModel");
 
       VLOG(1) << "Serializing resulting SavedModel to " << output_file;
@@ -167,7 +179,7 @@ tensorflow::Status ExportTFGModule(mlir::ModuleOp module_op,
     case DataFormat::GraphDef: {
       tensorflow::GraphDef new_graphdef;
       TF_RETURN_WITH_CONTEXT_IF_ERROR(
-          tensorflow::ExportMlirToGraphdef(module_op, &new_graphdef),
+          mlir::tfg::ConvertToGraphDef(module_op, &new_graphdef),
           "while converting TFG to GraphDef");
 
       VLOG(1) << "Serializing resulting GraphDef to " << output_file;
@@ -206,7 +218,7 @@ int main(int argc, char** argv) {
     LOG(QFATAL) << "Model import failed: "
                 << module_ref_status.status().ToString();
   }
-  auto module_ref = std::move(module_ref_status.ValueOrDie());
+  auto module_ref = std::move(module_ref_status.value());
 
   // Parse the optimization pipeline configuration and run requested graph
   // optimizations.

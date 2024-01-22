@@ -69,7 +69,7 @@ Status FillServerDef(const string& job_spec, const string& job_name,
   ConfigProto* config = options->mutable_default_session_config();
   (*config->mutable_device_count())["CPU"] = num_cpus;
   (*config->mutable_device_count())["GPU"] = num_gpus;
-  return Status::OK();
+  return OkStatus();
 }
 
 }  // namespace
@@ -100,8 +100,7 @@ int main(int argc, char* argv[]) {
   tensorflow::Status s = tensorflow::FillServerDef(job_spec, job_name, num_cpus,
                                                    num_gpus, task_index, &def);
   if (!s.ok()) {
-    LOG(ERROR) << "Could not parse job spec: " << s.error_message() << "\n"
-               << usage;
+    LOG(ERROR) << "Could not parse job spec: " << s.message() << "\n" << usage;
     return -1;
   }
 
@@ -109,7 +108,7 @@ int main(int argc, char* argv[]) {
   s = tensorflow::NewServer(def, &svr);
 
   if (!s.ok()) {
-    LOG(ERROR) << "Could not create server: " << s.error_message();
+    LOG(ERROR) << "Could not create server: " << s.message();
     return -1;
   }
   TF_QCHECK_OK(svr->Start());

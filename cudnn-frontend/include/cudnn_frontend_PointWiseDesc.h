@@ -131,6 +131,14 @@ class PointWiseDesc_v8 : public BackendDescriptor {
             case CUDNN_POINTWISE_BINARY_SELECT:
                 return 4;
 #endif
+#if (CUDNN_VERSION >= 8900)
+            case CUDNN_POINTWISE_RECIPROCAL:
+                return 2;
+#endif
+#ifndef NO_DEFAULT_IN_SWITCH
+            default:
+                return -1;
+#endif
         }
         return -1;
     }
@@ -438,4 +446,8 @@ class PointWiseDescBuilder_v8 {
    private:
     PointWiseDesc_v8 m_pointWiseDesc;
 };
+using PointWiseDescBuilder      = PointWiseDescBuilder_v8;
+using PointWiseDesc             = PointWiseDesc_v8;
+using PointwiseDescBuilder      = PointWiseDescBuilder_v8;
+using PointwiseDesc             = PointWiseDesc_v8;
 }

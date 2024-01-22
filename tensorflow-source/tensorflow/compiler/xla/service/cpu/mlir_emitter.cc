@@ -27,7 +27,7 @@ limitations under the License.
 #include "mlir/Pass/PassManager.h"  // from @llvm-project
 #include "mlir/Target/LLVMIR/Export.h"  // from @llvm-project
 #include "mlir/Transforms/Passes.h"  // from @llvm-project
-#include "tensorflow/compiler/mlir/xla/hlo_utils.h"
+#include "tensorflow/compiler/xla/translate/hlo_to_mhlo/hlo_utils.h"
 
 namespace xla {
 namespace cpu {
@@ -42,14 +42,14 @@ std::unique_ptr<llvm::Module> MakeLLVMModule(
   // TODO(kramerb): link this to the right option, command line flag, etc.
   constexpr bool kReassociateFPReductions = true;
 
-  mlir::PassManager manager(module->getContext(),
+  mlir::PassManager manager((*module)->getName(),
                             mlir::OpPassManager::Nesting::Implicit);
   manager.addPass(mlir::createConvertLinalgToLoopsPass());
   manager.addPass(mlir::createLowerAffinePass());
   manager.addPass(mlir::createConvertSCFToCFPass());
-  manager.addPass(mlir::createConvertVectorToLLVMPass(
-      mlir::LowerVectorToLLVMOptions().enableReassociateFPReductions(
-          kReassociateFPReductions)));
+  mlir::ConvertVectorToLLVMPassOptions opts;
+  opts.reassociateFPReductions = kReassociateFPReductions;
+  manager.addPass(mlir::createConvertVectorToLLVMPass(opts));
   CHECK(succeeded(manager.run(*module)));
   return mlir::translateModuleToLLVMIR(*module, *context);
 }
@@ -59,9 +59,11 @@ void BuildViewForBuffer(llvm::SmallVectorImpl<llvm::Value *> *args,
                         llvm::IRBuilder<> *b, const Shape &opShape,
                         llvm::Value *op_val) {
   llvm::Type *ty = op_val->getType();
-  while (auto aty =
-             llvm::dyn_cast<llvm::ArrayType>(ty->getPointerElementType())) {
-    ty = aty->getElementType()->getPointerTo();
+  if (!ty->isOpaquePointerTy()) {
+    while (auto aty = llvm::dyn_cast<llvm::ArrayType>(
+               ty->getNonOpaquePointerElementType())) {
+      ty = aty->getElementType()->getPointerTo();
+    }
   }
   op_val = b->CreateBitCast(op_val, ty);
 
@@ -138,7 +140,7 @@ Status EmitMlirFuncAndCall(
   }
   b->CreateCall(func, op_vals);
 
-  return Status::OK();
+  return OkStatus();
 }
 
 }  // namespace cpu

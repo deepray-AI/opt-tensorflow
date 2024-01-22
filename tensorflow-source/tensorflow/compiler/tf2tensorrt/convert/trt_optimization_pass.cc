@@ -35,6 +35,7 @@ limitations under the License.
 #include "tensorflow/core/lib/strings/strcat.h"
 #include "tensorflow/core/platform/casts.h"
 #include "tensorflow/core/platform/logging.h"
+#include "tensorflow/core/util/dump_graph.h"
 
 #if GOOGLE_CUDA && GOOGLE_TENSORRT
 namespace tensorflow {
@@ -82,7 +83,7 @@ Status UpdateFunctionSpecificConversionParams(
     int tmp = 0;
     TF_RETURN_IF_ERROR(GetNodeAttr(attr, name, &tmp));
     *dst = static_cast<size_t>(tmp);
-    return Status::OK();
+    return OkStatus();
   };
 
   TF_RETURN_IF_ERROR(
@@ -98,8 +99,6 @@ Status UpdateFunctionSpecificConversionParams(
       TrtPrecisionModeFromName(precision_mode, &cp.precision_mode));
   TF_RETURN_IF_ERROR(GetNodeAttr(attr, "_tftrt_minimum_segment_size",
                                  &cp.minimum_segment_size));
-  TF_RETURN_IF_ERROR(GetNodeAttr(attr, "_tftrt_enable_sparse_compute",
-                                 &cp.enable_sparse_compute));
   TF_RETURN_IF_ERROR(GetNodeAttr(attr, "_tftrt_is_dyn_op", &cp.is_dynamic_op));
   TF_RETURN_IF_ERROR(
       GetNodeAttr(attr, "_tftrt_max_cached_engines", &cp.max_cached_engines));
@@ -114,14 +113,14 @@ Status UpdateFunctionSpecificConversionParams(
       ProfileStrategyFromName(profile_strategy, &cp.profile_strategy));
   TF_RETURN_IF_ERROR(GetNodeAttr(attr, "_tftrt_allow_build_at_runtime",
                                  &cp.allow_build_at_runtime));
-  return Status::OK();
+  return OkStatus();
 }
 }  // namespace
 
 Status TRTOptimizationPass::Init(
     const RewriterConfig_CustomGraphOptimizer* config) {
   if (config == nullptr) {
-    return Status::OK();
+    return OkStatus();
   }
   const auto params = config->parameter_map();
   if (params.count("minimum_segment_size")) {
@@ -139,10 +138,6 @@ Status TRTOptimizationPass::Init(
   if (params.count("max_workspace_size_bytes")) {
     params_.max_workspace_size_bytes =
         params.at("max_workspace_size_bytes").i();
-  }
-  if (params.count("enable_sparse_compute")) {
-    params_.enable_sparse_compute = 
-        params.at("enable_sparse_compute").b();
   }
   if (params.count("precision_mode")) {
     TF_RETURN_IF_ERROR(TrtPrecisionModeFromName(
@@ -171,7 +166,7 @@ Status TRTOptimizationPass::Init(
   if (params.count("dla_fallback_layers")) {
     params_.dla_fallback_layers = params.at("dla_fallback_layers").i();
   }
-  return Status::OK();
+  return OkStatus();
 }
 
 static bool ExplicitPrecisionModePolicy() {
@@ -190,7 +185,18 @@ Status TRTOptimizationPass::Optimize(grappler::Cluster* cluster,
       (item.id != "tf_graph" && !do_function_conversion)) {
     VLOG(1) << "Not optimizing this grappler item: " << item.id;
     *optimized_graph = item.graph;
-    return Status::OK();
+    return OkStatus();
+  }
+
+  static const string tftrt_graph_dump_path = [] {
+    string _tftrt_graph_dump_path;
+    TF_CHECK_OK(ReadStringFromEnvVar("TF_TRT_GRAPH_DUMP_PATH", /*default_value=*/"",
+                                     &_tftrt_graph_dump_path));
+    return _tftrt_graph_dump_path;
+  }();
+
+  if (!tftrt_graph_dump_path.empty()) {
+    DumpGraphDefToFile("before_TRTOptimizer_tf_graph", item.graph, tftrt_graph_dump_path);
   }
 
   if (params_.use_calibration &&
@@ -244,8 +250,15 @@ Status TRTOptimizationPass::Optimize(grappler::Cluster* cluster,
         UpdateFunctionSpecificConversionParams(params_, func_item.func_attr()));
   }
 
-  return ConvertGraph(params_, optimized_item, nodes_to_preserve, cluster,
+  Status status = ConvertGraph(params_, optimized_item, nodes_to_preserve, cluster,
                       optimized_graph);
+
+  if (!tftrt_graph_dump_path.empty()) {
+    DumpGraphDefToFile("after_TRTOptimizer_tf_graph",
+                      *optimized_graph, tftrt_graph_dump_path);
+  }
+
+  return status;
 }
 
 static grappler::CustomGraphOptimizerRegistrar TRTOptimizationPass_Registrar(

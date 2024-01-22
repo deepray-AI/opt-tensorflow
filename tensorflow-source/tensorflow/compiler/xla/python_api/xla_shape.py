@@ -17,7 +17,7 @@
 import numpy as _np  # Avoids becoming a part of public Tensorflow API.
 
 from tensorflow.compiler.xla import xla_data_pb2
-from tensorflow.compiler.xla.python_api import types
+from tensorflow.compiler.xla.python_api import types_
 
 
 class Shape(object):
@@ -59,7 +59,6 @@ class Shape(object):
       self.message.dimensions.extend(dimensions)
       if layout is None:
         layout = list(reversed(range(len(dimensions))))
-      self.message.layout.format = xla_data_pb2.DENSE
       self.message.layout.minor_to_major.extend(layout)
 
   def element_type(self):
@@ -103,7 +102,7 @@ def _CreateShapeFromNumpy(ndarray):  # pylint: disable=invalid-name
   Returns:
     A Shape object.
   """
-  element_type = types.MAP_DTYPE_TO_RECORD[str(ndarray.dtype)].primitive_type
+  element_type = types_.MAP_DTYPE_TO_RECORD[str(ndarray.dtype)].primitive_type
   dimensions = ndarray.shape
 
   # Set the shape's layout based on the ordering of ndarray.
@@ -148,5 +147,5 @@ def CreateShapeFromDtypeAndTuple(dtype, shape_tuple):  # pylint: disable=invalid
   Returns:
     A Shape object.
   """
-  element_type = types.MAP_DTYPE_TO_RECORD[str(dtype)].primitive_type
+  element_type = types_.MAP_DTYPE_TO_RECORD[str(dtype)].primitive_type
   return Shape(element_type, shape_tuple)

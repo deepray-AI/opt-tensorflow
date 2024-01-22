@@ -1,7 +1,7 @@
-load("//tensorflow:tensorflow.bzl", "cuda_py_test")
+load("//tensorflow:tensorflow.default.bzl", "cuda_py_test")
 
 package(
-    default_visibility = ["//tensorflow:internal"],
+    # copybara:uncomment default_applicable_licenses = ["//tensorflow:license"],
     licenses = ["notice"],
 )
 
@@ -17,7 +17,7 @@ cuda_py_test(
         "//tensorflow/python:math_ops",
         "//tensorflow/python:nn_grad",
         "//tensorflow/python:nn_ops",
-        "//tensorflow/python:platform",
+        "//tensorflow/python/platform:tf_logging",
         "//third_party/py/numpy",
     ],
 )

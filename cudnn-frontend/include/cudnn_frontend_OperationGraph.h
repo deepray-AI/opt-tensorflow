@@ -36,6 +36,9 @@
 #include "cudnn_frontend_Operation.h"
 #include "cudnn_frontend_utils.h"
 
+// Compile time constant for max ops in a op graph
+constexpr int64_t MAX_OPGRAPH_OPS = 50;
+
 namespace cudnn_frontend {
 
 ///
@@ -78,7 +81,7 @@ class OperationGraph_v8 : public BackendDescriptor {
                                                CUDNN_ATTR_OPERATIONGRAPH_ENGINE_GLOBAL_COUNT,
                                                CUDNN_TYPE_INT64,
                                                1,
-                                               NULL,
+                                               nullptr,
                                                &global_count);
         if (status != CUDNN_STATUS_SUCCESS) {
             set_error_and_throw_exception(this,
@@ -100,14 +103,24 @@ class OperationGraph_v8 : public BackendDescriptor {
         return opGraphTag;
     }
 
+    bool
+    setFeatureVector(feature_vector_t fv) {
+        feature_vectors.push_back(fv);
+        return true;
+    }
+
     feature_vector_t
     getFeatureVector() const {
-        if (numOps != 1) {
-            return {}; /// We do not support multiop opGraph at this point of time.
-        } else {
+        if(feature_vectors.size() != 0) {
             return feature_vectors[0];
+        } else {
+            return {};
         }
+    }
 
+    const std::array<ManagedOpaqueDescriptor, MAX_OPGRAPH_OPS> &
+    getOps() const {
+        return ops;
     }
 
    private:
@@ -117,7 +130,7 @@ class OperationGraph_v8 : public BackendDescriptor {
     operator=(OperationGraph_v8 const &) = delete;
 
     cudnnHandle_t handle = nullptr;
-    std::array<ManagedOpaqueDescriptor, 10> ops{};
+    std::array<ManagedOpaqueDescriptor, MAX_OPGRAPH_OPS> ops{};
     int64_t numOps         = -1;
     std::string opGraphTag = "";
     std::vector<feature_vector_t> feature_vectors;
@@ -142,11 +155,24 @@ class OperationGraphBuilder_v8 {
     auto
     setOperationGraph(int64_t numOps_, Operation_v8 const **ops_) -> OperationGraphBuilder_v8 & {
         m_operationGraph.numOps = numOps_;
-        m_operationGraph.feature_vectors.resize(numOps_);
+        m_operationGraph.feature_vectors.resize(static_cast<size_t>(numOps_));
         for (auto i = 0u; i < numOps_; i++) {
             m_operationGraph.ops[i] = ops_[i]->get_desc();
             m_operationGraph.opGraphTag += ops_[i]->getTag() + '_';
             m_operationGraph.feature_vectors[i] = ops_[i]->getFeatureVector();
+        }
+        return *this;
+    }
+
+    //! Set numoperations and the operations
+    auto
+    setOperationGraph(std::vector<Operation> const & ops_) -> OperationGraphBuilder_v8 & {
+        m_operationGraph.numOps = ops_.size();
+        m_operationGraph.feature_vectors.resize(ops_.size());
+        for (auto i = 0u; i < ops_.size(); i++) {
+            m_operationGraph.ops[i] = ops_[i].get_desc();
+            m_operationGraph.opGraphTag += ops_[i].getTag() + '_';
+            m_operationGraph.feature_vectors[i] = ops_[i].getFeatureVector();
         }
         return *this;
     }
@@ -186,7 +212,7 @@ class OperationGraphBuilder_v8 {
             return std::move(m_operationGraph);
         }
 
-        std::array<cudnnBackendDescriptor_t, 10> ops_raw{nullptr};
+        std::array<cudnnBackendDescriptor_t, 50> ops_raw{nullptr};
         for (auto i = 0u; i < m_operationGraph.numOps; i++) {
             ops_raw[i] = m_operationGraph.ops[i]->get_backend_descriptor();
         }

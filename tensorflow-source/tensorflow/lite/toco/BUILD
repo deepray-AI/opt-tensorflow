@@ -8,8 +8,10 @@ load(
     "tf_cc_test",
     "tf_copts",
 )
+load("//tensorflow:tensorflow.default.bzl", "get_compatible_with_portable")
 
 package(
+    # copybara:uncomment default_applicable_licenses = ["//tensorflow:license"],
     default_visibility = ["//visibility:public"],
     licenses = ["notice"],
 )
@@ -25,7 +27,10 @@ tf_proto_library(
     name = "toco_flags_proto",
     srcs = ["toco_flags.proto"],
     cc_api_version = 2,
-    protodeps = [":types_proto"],
+    protodeps = [
+        "//tensorflow/compiler/mlir/quantization/stablehlo:quantization_options_proto",
+        ":types_proto",
+    ],
     visibility = ["//visibility:public"],
 )
 
@@ -48,6 +53,7 @@ cc_library(
         "runtime/common.h",
         "runtime/types.h",
     ],
+    compatible_with = get_compatible_with_portable(),
     linkstatic = 1,
     visibility = ["//visibility:public"],
     deps = [
@@ -296,7 +302,6 @@ cc_library(
         "import_tensorflow.h",
         "tensorflow_util.h",
         "toco_tooling.h",
-        "//tensorflow/core/common_runtime:core_cpu_lib_headers",
     ],
     copts = tf_copts(),
     visibility = ["//visibility:public"],
@@ -310,6 +315,7 @@ cc_library(
         ":toco_port",
         ":tooling_util",
         ":types_proto_cc",
+        "//tensorflow/core:core_cpu_lib",
         "//tensorflow/core:framework",
         "//tensorflow/core:lib",
         "//tensorflow/core:protos_all_cc",
@@ -399,6 +405,7 @@ cc_library(
         "//tensorflow/core:lib",
         # We cannot embed the core:ops dependency directly into :toco_tooling as
         # it can conflict with downstream deps when toco is used as a library.
+        "//tensorflow/core:ops",
     ],
 )
 
@@ -420,6 +427,7 @@ tf_cc_binary(
         "//tensorflow/core:lib",
         # We cannot embed the core:ops dependency directly into :toco_tooling as
         # it can conflict with downstream deps when toco is used as a library.
+        "//tensorflow/core:ops",
     ],
 )
 

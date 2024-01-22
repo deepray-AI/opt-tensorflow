@@ -67,10 +67,11 @@ Master::Master(MasterEnv* env, double session_gc_seconds)
       last_1000_steps_(1000),
       step_count_(0),
       session_gc_seconds_(session_gc_seconds),
-      recent_request_ids_(10000) {
+      recent_request_ids_(10000, env_->experimental_num_shards) {
   // Right now, a master service must be co-located with a device.
   // Otherwise, fetches do not work.
   CHECK(!env->local_devices.empty());
+  DCHECK_GT(env_->experimental_num_shards, 0);
 
   if (session_gc_seconds_ > 0.0) {
     gc_thread_ = env_->env->StartThread(ThreadOptions(), "TF_master_GC",
@@ -142,7 +143,7 @@ class DeviceFinder {
     finder.Start();
     TF_RETURN_IF_ERROR(finder.Wait());
     finder.GetRemoteDevices(env->local_devices, out_remote);
-    return Status::OK();
+    return OkStatus();
   }
 
   static void GetRemoteWorkers(
@@ -235,6 +236,8 @@ class DeviceFinder {
   }
 
   void Start() {
+    LOG(INFO) << "Scanning workers for devices: " << targets_.size()
+              << " total workers";
     {
       mutex_lock l(mu_);
       num_pending_ = targets_.size();
@@ -243,13 +246,14 @@ class DeviceFinder {
       }
     }
     // Talk to all workers to get the list of available devices.
-    using std::placeholders::_1;
-    using std::placeholders::_2;
     for (size_t i = 0; i < targets_.size(); ++i) {
       // TODO(mrry): Propagate a timeout here, since `this->WhenFound()` may
       // never be called.
-      NewRemoteDevices(env_->env, worker_cache_, targets_[i],
-                       std::bind(&ME::WhenFound, this, i, _1, _2));
+      NewRemoteDevices(
+          env_->env, worker_cache_, targets_[i],
+          [this, i](const Status& s, std::vector<Device*>* devices) {
+            WhenFound(i, s, devices);
+          });
     }
   }
 
@@ -359,8 +363,6 @@ void Master::CreateSession(const CreateSessionRequest* req,
   SchedClosure([this, req, resp, done]() {
     Status status;
     WorkerCacheFactoryOptions worker_cache_factory_options;
-    string grpc_protocol("grpc");
-    worker_cache_factory_options.protocol = &grpc_protocol;
     auto call_done = gtl::MakeCleanup([&status, &done] { done(status); });
     status = ValidateExternalGraphDefSyntax(req->graph_def());
     if (!status.ok()) return;
@@ -462,6 +464,9 @@ void Master::CreateSession(const CreateSessionRequest* req,
     SessionOptions options;
     options.target = req->target();
     options.config = req->config();
+    // Disable optimizations for static graph to allow calls to Session::Extend.
+    options.config.mutable_experimental()
+        ->set_disable_optimize_for_static_graph(true);
 
     std::vector<string> filtered_worker_list;
     DeviceFinder::GetRemoteWorkers(req->config().device_filters(), env_,

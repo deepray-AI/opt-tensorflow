@@ -8,10 +8,6 @@ tf_class {
     mtype: "<type \'property\'>"
   }
   member {
-    name: "enable_sparse_compute"
-    mtype: "<type \'property\'>"
-  }
-  member {
     name: "max_workspace_size_bytes"
     mtype: "<type \'property\'>"
   }

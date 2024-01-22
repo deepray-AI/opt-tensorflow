@@ -101,7 +101,7 @@ __global__ __launch_bounds__(1024) void SparseApplyProximalAdagradKernel(
     // compute v = w - lr * grad.
     T prox_var_i = var_i - grad_i * learning_rate;
     // compute sign(v) * max(|v| - lr * max(l1, 0), 0)
-    var_i = (prox_var_i >= T(0.) ? T(1.) : T(-1.)) *
+    var_i = (prox_var_i >= 0 ? T(1.) : T(-1.)) *
             max(abs(prox_var_i) - learning_rate * max(l1_t, T(0)), T(0)) /
             (T(1.) + l2_t * learning_rate);
 
@@ -440,7 +440,7 @@ struct SparseApplyAdagrad<GPUDevice, T, Tindex, has_epsilon> {
     const Tindex grad_size = grad.size();
     const Tindex indices_size = indices.size();
     if (grad_size == 0) {
-      return Status::OK();
+      return OkStatus();
     }
     GpuLaunchConfig config = GetGpuLaunchConfig(grad_size, d);
     return GpuLaunchKernel(
@@ -501,7 +501,7 @@ struct SparseApplyProximalAdagrad<GPUDevice, T, Tindex> {
     const Tindex grad_size = grad.size();
     const Tindex indices_size = indices.size();
     if (grad_size == 0) {
-      return Status::OK();
+      return OkStatus();
     }
     GpuLaunchConfig config = GetGpuLaunchConfig(grad_size, d);
     return GpuLaunchKernel(SparseApplyProximalAdagradKernel<T, Tindex>,
@@ -711,7 +711,7 @@ struct SparseApplyFtrl<GPUDevice, T, Tindex, has_l2_shrinkage> {
     const Tindex grad_size = grad.size();
     const Tindex indices_size = indices.size();
     if (grad_size == 0) {
-      return Status::OK();
+      return OkStatus();
     }
     // The simpler overload of GetGpuLaunchConfig() would result in a "too many
     // resources requested for launch" error.

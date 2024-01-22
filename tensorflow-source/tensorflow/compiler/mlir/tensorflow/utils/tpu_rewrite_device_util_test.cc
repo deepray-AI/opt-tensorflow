@@ -16,6 +16,7 @@ limitations under the License.
 #include "tensorflow/compiler/mlir/tensorflow/utils/tpu_rewrite_device_util.h"
 
 #include <cstdint>
+#include <optional>
 #include <tuple>
 
 #include "llvm/Support/FormatVariadic.h"
@@ -62,7 +63,7 @@ TEST_P(ParameterizedDeviceSetTest, BadDeviceSet) {
       devices, /*num_replicas=*/1, /*num_cores_per_replica=*/1, topology_attr,
       device_assignment_attr);
   ASSERT_FALSE(status_or.ok());
-  EXPECT_EQ(status_or.status().error_message(), std::get<1>(GetParam()));
+  EXPECT_EQ(status_or.status().message(), std::get<1>(GetParam()));
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -103,13 +104,13 @@ TEST_P(ParameterizedMetadataTest, BadMetadata) {
       &devices));
   std::string compilation_device;
   llvm::SmallVector<llvm::SmallVector<std::string, 8>, 8> execution_devices;
-  llvm::Optional<xla::DeviceAssignmentProto> xla_device_assignment;
+  std::optional<xla::DeviceAssignmentProto> xla_device_assignment;
 
   auto status_or = GetTPUCompilationAndExecutionDevices(
       devices, std::get<0>(GetParam()), std::get<1>(GetParam()),
       std::get<2>(GetParam()), std::get<3>(GetParam()));
   ASSERT_FALSE(status_or.ok());
-  EXPECT_EQ(status_or.status().error_message(), std::get<4>(GetParam()));
+  EXPECT_EQ(status_or.status().message(), std::get<4>(GetParam()));
 }
 
 std::string TopologyWithMeshShape(llvm::ArrayRef<int> mesh_shape) {
@@ -309,7 +310,7 @@ TEST(TPURewriteDeviceUtilTest,
       device_assignment_attr);
 
   ASSERT_FALSE(status_or.ok());
-  EXPECT_EQ(status_or.status().error_message(),
+  EXPECT_EQ(status_or.status().message(),
             "no TPU device found for 'device_assignment' device coordinate (1, "
             "0, 0, 0)");
 }
@@ -328,7 +329,7 @@ TEST(TPURewriteDeviceUtilTest, ValidFullMeshDeviceAssignment) {
 
   TF_ASSERT_OK(status_or.status());
 
-  const auto& tpu_device_assignment = status_or.ValueOrDie();
+  const auto& tpu_device_assignment = status_or.value();
   EXPECT_EQ(tpu_device_assignment.compilation_device,
             "/job:worker/replica:0/task:0/device:CPU:0");
   const auto& tpu_devices = tpu_device_assignment.tpu_devices;
@@ -369,7 +370,7 @@ TEST(TPURewriteDeviceUtilTest, ValidFullMeshDeviceAssignment) {
   EXPECT_EQ(tpu_devices[7][0].host,
             "/job:worker/replica:0/task:1/device:CPU:0");
 
-  EXPECT_FALSE(tpu_device_assignment.xla_device_assignment.hasValue());
+  EXPECT_FALSE(tpu_device_assignment.xla_device_assignment.has_value());
 }
 
 TEST(TPURewriteDeviceUtilTest, ValidGeneralDeviceAssignmentMesh2x2x2) {
@@ -431,7 +432,7 @@ TEST(TPURewriteDeviceUtilTest, ValidGeneralDeviceAssignmentMesh2x2x2) {
 
   TF_ASSERT_OK(status_or.status());
 
-  const auto& tpu_device_assignment = status_or.ValueOrDie();
+  const auto& tpu_device_assignment = status_or.value();
   EXPECT_EQ(tpu_device_assignment.compilation_device,
             "/job:worker/replica:0/task:0/device:CPU:0");
   const auto& tpu_devices = tpu_device_assignment.tpu_devices;
@@ -473,7 +474,7 @@ TEST(TPURewriteDeviceUtilTest, ValidGeneralDeviceAssignmentMesh2x2x2) {
             "/job:worker/replica:0/task:1/device:CPU:0");
 
   auto& xla_device_assignment = tpu_device_assignment.xla_device_assignment;
-  ASSERT_TRUE(xla_device_assignment.hasValue());
+  ASSERT_TRUE(xla_device_assignment.has_value());
   EXPECT_EQ(xla_device_assignment->replica_count(), 4);
   EXPECT_EQ(xla_device_assignment->computation_count(), 2);
   ASSERT_EQ(xla_device_assignment->computation_devices_size(), 2);
@@ -544,7 +545,7 @@ TEST(TPURewriteDeviceUtilTest, ValidGeneralDeviceAssignmentMesh1x2x1x3) {
 
   TF_ASSERT_OK(status_or.status());
 
-  auto& tpu_device_assignment = status_or.ValueOrDie();
+  auto& tpu_device_assignment = status_or.value();
   EXPECT_EQ(tpu_device_assignment.compilation_device,
             "/job:worker/replica:0/task:0/device:CPU:0");
 
@@ -579,7 +580,7 @@ TEST(TPURewriteDeviceUtilTest, ValidGeneralDeviceAssignmentMesh1x2x1x3) {
             "/job:worker/replica:0/task:0/device:CPU:0");
 
   auto& xla_device_assignment = tpu_device_assignment.xla_device_assignment;
-  ASSERT_TRUE(xla_device_assignment.hasValue());
+  ASSERT_TRUE(xla_device_assignment.has_value());
   EXPECT_EQ(xla_device_assignment->replica_count(), 2);
   EXPECT_EQ(xla_device_assignment->computation_count(), 3);
   ASSERT_EQ(xla_device_assignment->computation_devices_size(), 3);
@@ -608,7 +609,7 @@ TEST(TPURewriteDeviceUtilTest, TestGetDeviceCoordinates) {
   auto status_or_device_coodinates =
       GetDeviceCoordinates(device_assignment_attr);
   ASSERT_TRUE(status_or_device_coodinates.ok());
-  auto device_coordinates = status_or_device_coodinates.ConsumeValueOrDie();
+  auto device_coordinates = status_or_device_coodinates.value();
   EXPECT_EQ(device_coordinates[0], 1);
   EXPECT_EQ(device_coordinates[1], 2);
   EXPECT_EQ(device_coordinates[2], 3);
@@ -621,7 +622,7 @@ TEST(TPURewriteDeviceUtilTest, TestInvalidAttrForDeviceAssignmentDisallowed) {
   auto status_or_device_coodinates =
       GetDeviceCoordinates(device_assignment_attr);
   ASSERT_TRUE(!status_or_device_coodinates.ok());
-  EXPECT_EQ(status_or_device_coodinates.status().error_message(),
+  EXPECT_EQ(status_or_device_coodinates.status().message(),
             "bad 'device_assignment' attribute at index 0, not an int");
 }
 
@@ -672,10 +673,30 @@ TEST(TPURewriteDeviceUtilTest,
   llvm::SmallVector<mlir::Type, 8> result_types;
   auto cluster = builder.create<mlir::tf_device::ClusterOp>(
       mlir::UnknownLoc::get(&context), result_types);
+  cluster->setAttr(kNumCoresPerReplicaAttr,
+                   builder.getIntegerAttr(builder.getIntegerType(64), 1));
   cluster->setAttr(kTopologyAttr, builder.getStringAttr(""));
   cluster->setAttr(kDeviceAssignmentAttr, builder.getArrayAttr({}));
 
   EXPECT_FALSE(HasModelParallelism(cluster));
+}
+
+TEST(TPURewriteDeviceUtilTest,
+     TestGetHostFailNumCoresPerReplicaMissingAttributes) {
+  mlir::MLIRContext context;
+  context.loadDialect<mlir::tf_device::TensorFlowDeviceDialect>();
+  mlir::OwningOpRef<mlir::ModuleOp> module_ref =
+      mlir::ModuleOp::create(mlir::UnknownLoc::get(&context));
+  mlir::OpBuilder builder(module_ref->getBodyRegion());
+  llvm::SmallVector<mlir::Type, 8> result_types;
+  auto cluster = builder.create<mlir::tf_device::ClusterOp>(
+      mlir::UnknownLoc::get(&context), result_types);
+  cluster->setAttr(kDeviceAssignmentAttr, builder.getArrayAttr({}));
+
+  mlir::TF::RuntimeDevices devices;
+  std::string host_device;
+  EXPECT_TRUE(mlir::failed(
+      GetHostDeviceOutsideComputation(devices, cluster, &host_device)));
 }
 
 TEST(TPURewriteDeviceUtilTest, TestGetHostFailDeviceMissingAttributes) {
@@ -687,6 +708,8 @@ TEST(TPURewriteDeviceUtilTest, TestGetHostFailDeviceMissingAttributes) {
   llvm::SmallVector<mlir::Type, 8> result_types;
   auto cluster = builder.create<mlir::tf_device::ClusterOp>(
       mlir::UnknownLoc::get(&context), result_types);
+  cluster->setAttr(kNumCoresPerReplicaAttr,
+                   builder.getIntegerAttr(builder.getIntegerType(64), 1));
 
   mlir::TF::RuntimeDevices devices;
   std::string host_device;
@@ -796,8 +819,8 @@ TEST(TPURewriteDeviceUtilTest, TestGetHostDeviceTPUReplicate) {
       mlir::UnknownLoc::get(&context), /*num_replicas=*/2, devices,
       llvm::ArrayRef<std::pair<mlir::ValueRange, mlir::Type>>{},
       mlir::ValueRange{}, mlir::TypeRange{});
-  builder.setInsertionPoint(&replicate.body().front(),
-                            replicate.body().front().begin());
+  builder.setInsertionPoint(&replicate.getBody().front(),
+                            replicate.getBody().front().begin());
 
   llvm::SmallVector<mlir::Type, 8> result_types;
   auto cluster = builder.create<mlir::tf_device::ClusterOp>(
@@ -807,7 +830,7 @@ TEST(TPURewriteDeviceUtilTest, TestGetHostDeviceTPUReplicate) {
   std::string host_device;
   EXPECT_TRUE(mlir::succeeded(
       GetHostDeviceOutsideComputation(runtime_devices, cluster, &host_device)));
-  EXPECT_EQ(host_device, kTPUReplicatedHost);
+  EXPECT_EQ(host_device, GetDeviceAliasForHostOfLogicalCore(0));
 }
 
 TEST(TPURewriteDeviceUtilTest, TestGetHostDeviceNotReplicated) {
@@ -837,6 +860,55 @@ TEST(TPURewriteDeviceUtilTest, TestGetHostDeviceNotReplicated) {
   EXPECT_TRUE(mlir::succeeded(
       GetHostDeviceOutsideComputation(runtime_devices, cluster, &host_device)));
   EXPECT_EQ(host_device, "/job:localhost/replica:0/task:0/device:CPU:0");
+}
+
+TEST(TPURewriteDeviceUtilTest, TestGetHostDeviceInGenericPipeline) {
+  mlir::MLIRContext context;
+  context.loadDialect<mlir::tf_device::TensorFlowDeviceDialect>();
+  mlir::OwningOpRef<mlir::ModuleOp> module_ref =
+      mlir::ModuleOp::create(mlir::UnknownLoc::get(&context));
+  mlir::OpBuilder builder(module_ref->getBodyRegion());
+  (*module_ref)
+      ->setAttr("tf.devices",
+                builder.getStrArrayAttr(llvm::ArrayRef<llvm::StringRef>(
+                    {"/job:localhost/replica:0/task:0/device:CPU:0"})));
+
+  llvm::SmallVector<mlir::Type, 8> result_types;
+  auto cluster = builder.create<mlir::tf_device::ClusterOp>(
+      mlir::UnknownLoc::get(&context), result_types);
+
+  mlir::TF::RuntimeDevices runtime_devices;
+  (void)GetDevicesFromOp(*module_ref, &runtime_devices);
+  std::string host_device;
+  EXPECT_TRUE(mlir::succeeded(
+      GetHostDeviceOutsideComputation(runtime_devices, cluster, &host_device)));
+  EXPECT_EQ(host_device, "/job:localhost/replica:0/task:0/device:CPU:0");
+}
+
+TEST(TPURewriteDeviceUtilTest, TestGetHostDeviceInGenericPipelineMultiCPUs) {
+  mlir::MLIRContext context;
+  context.loadDialect<mlir::tf_device::TensorFlowDeviceDialect>();
+  mlir::OwningOpRef<mlir::ModuleOp> module_ref =
+      mlir::ModuleOp::create(mlir::UnknownLoc::get(&context));
+  mlir::OpBuilder builder(module_ref->getBodyRegion());
+  (*module_ref)
+      ->setAttr("tf.devices",
+                builder.getStrArrayAttr(llvm::ArrayRef<llvm::StringRef>(
+                    {"/job:chief/replica:0/task:0/device:CPU:0",
+                     "/job:ps/replica:0/task:0/device:CPU:0",
+                     "/job:ps/replica:0/task:1/device:CPU:0",
+                     "/job:worker/replica:0/task:2/device:CPU:0"})));
+
+  llvm::SmallVector<mlir::Type, 8> result_types;
+  auto cluster = builder.create<mlir::tf_device::ClusterOp>(
+      mlir::UnknownLoc::get(&context), result_types);
+
+  mlir::TF::RuntimeDevices runtime_devices;
+  (void)GetDevicesFromOp(*module_ref, &runtime_devices);
+  std::string host_device;
+  EXPECT_TRUE(mlir::succeeded(
+      GetHostDeviceOutsideComputation(runtime_devices, cluster, &host_device)));
+  EXPECT_EQ(host_device, "/job:chief/replica:0/task:0/device:CPU:0");
 }
 
 TEST(TPURewriteDeviceUtilTest, TestIsTPUDevice) {

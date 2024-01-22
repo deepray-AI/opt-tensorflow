@@ -1,5 +1,5 @@
 load("@bazel_skylib//rules:common_settings.bzl", "string_flag")
-load("@local_config_cuda//cuda:build_defs.bzl", "enable_cuda_flag", "enable_cutensor_flag")
+load("@local_config_cuda//cuda:build_defs.bzl", "enable_cuda_flag")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -16,15 +16,6 @@ enable_cuda_flag(
     }),
 )
 
-enable_cutensor_flag(
-    name = "enable_cutensor",
-    build_setting_default = False,
-    enable_override = select({
-        ":define_using_cuda_cutensor": True,
-        "//conditions:default": False,
-    }),
-)
-
 # Config setting whether CUDA support has been requested.
 #
 # Enable path: ./configure > --config=cuda (.tf_configure.bazelrc)
@@ -32,15 +23,6 @@ enable_cutensor_flag(
 config_setting(
     name = "is_cuda_enabled",
     flag_values = {":enable_cuda": "True"},
-)
-
-# Build flag to select whether or not to use cuTENSOR
-#
-# Enable path: ./configure > --config=cutensor (.tf_configure.bazelrc)
-#     > --//tensorflow:enable_cutensor (.bazelrc) > :is_cutensor_enabled
-config_setting(
-    name = "is_cutensor_enabled",
-    flag_values = {":enable_cutensor": "True"},
 )
 
 # Build flag to select CUDA compiler.
@@ -74,11 +56,5 @@ config_setting(
 config_setting(
     name = "define_using_cuda_nvcc",
     define_values = {"using_cuda_nvcc": "true"},
-    visibility = ["//visibility:private"],
-)
-
-config_setting(
-    name = "define_using_cuda_cutensor",
-    define_values = {"using_cuda_cutensor": "true"},
     visibility = ["//visibility:private"],
 )

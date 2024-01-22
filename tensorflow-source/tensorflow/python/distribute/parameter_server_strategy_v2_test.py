@@ -22,9 +22,10 @@ from absl.testing import parameterized
 import numpy as np
 
 from tensorflow.core.protobuf import saved_model_pb2
+from tensorflow.python.checkpoint import checkpoint as tracking_util
 from tensorflow.python.compat import v2_compat
 from tensorflow.python.data.ops import dataset_ops
-from tensorflow.python.distribute import distribution_strategy_context
+from tensorflow.python.distribute import distribute_lib
 from tensorflow.python.distribute import multi_process_runner
 from tensorflow.python.distribute import multi_worker_test_base
 from tensorflow.python.distribute import parameter_server_strategy_v2
@@ -49,9 +50,8 @@ from tensorflow.python.ops import variable_scope
 from tensorflow.python.ops import variables
 from tensorflow.python.platform import gfile
 from tensorflow.python.saved_model import save as tf_save
+from tensorflow.python.trackable import autotrackable
 from tensorflow.python.training.server_lib import ClusterSpec
-from tensorflow.python.training.tracking import tracking
-from tensorflow.python.training.tracking import util as tracking_util
 
 
 class ParameterServerStrategyV2Test(test.TestCase):
@@ -178,7 +178,7 @@ class ParameterServerStrategyV2Test(test.TestCase):
         "coordinator, which can be slow. To properly dispatch functions to "
         "run on workers, methods like `run` or `reduce` should be used "
         "within a function passed to `tf.distribute.experimental.coordinator."
-        "ClusterCoordinator.schedule`.", logs.output[0])
+        "ClusterCoordinator.schedule`.", "".join(logs.output))
 
   def testRunNotUsedWithClusterCoordinator(self):
     strategy = parameter_server_strategy_v2.ParameterServerStrategyV2(
@@ -361,7 +361,7 @@ class VariablePartitioningTest(test.TestCase, parameterized.TestCase):
       self.assertIsInstance(v, variables.Variable)
 
     def replica_fn():
-      replica_id = distribution_strategy_context.get_replica_context(
+      replica_id = distribute_lib.get_replica_context(
       ).replica_id_in_sync_group
       val = array_ops.reshape(
           math_ops.cast(replica_id + 10, dtype=v.dtype), [1])
@@ -394,7 +394,7 @@ class VariablePartitioningTest(test.TestCase, parameterized.TestCase):
       self.assertIsInstance(v.variables[0], variables.Variable)
 
     def replica_fn():
-      replica_id = distribution_strategy_context.get_replica_context(
+      replica_id = distribute_lib.get_replica_context(
       ).replica_id_in_sync_group
       val = array_ops.reshape(
           math_ops.cast(replica_id + 10, dtype=v.dtype), [1])
@@ -600,7 +600,7 @@ class VariablePartitioningTest(test.TestCase, parameterized.TestCase):
       return variables.Variable(
           name=name, initial_value=initial_value, shape=shape, dtype=dtype)
 
-    class Model(tracking.AutoTrackable):
+    class Model(autotrackable.AutoTrackable):
 
       def build(self):
         self.w = self._add_variable_with_custom_getter(

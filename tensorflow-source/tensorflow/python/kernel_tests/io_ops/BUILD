@@ -1,9 +1,9 @@
 # Tests of TensorFlow IO kernels written using the Python API.
 
-load("//tensorflow:tensorflow.bzl", "tf_py_test")
+load("//tensorflow:tensorflow.default.bzl", "tf_py_test")
 
 package(
-    default_visibility = ["//tensorflow:internal"],
+    # copybara:uncomment default_applicable_licenses = ["//tensorflow:license"],
     licenses = ["notice"],
 )
 
@@ -21,10 +21,10 @@ tf_py_test(
         "//tensorflow/python:framework_ops",
         "//tensorflow/python:math_ops",
         "//tensorflow/python:partitioned_variables",
-        "//tensorflow/python:platform",
         "//tensorflow/python:training",
         "//tensorflow/python:variable_scope",
         "//tensorflow/python:variables",
+        "//tensorflow/python/platform:flags",
         "//third_party/py/numpy",
     ],
 )
@@ -50,7 +50,7 @@ tf_py_test(
     deps = [
         "//tensorflow/python:client_testlib",
         "//tensorflow/python:io_ops",
-        "//tensorflow/python:util",
+        "//tensorflow/python/util:compat",
     ],
 )
 
@@ -66,7 +66,7 @@ tf_py_test(
         "//tensorflow/python:framework",
         "//tensorflow/python:framework_for_generated_wrappers",
         "//tensorflow/python:parsing_ops",
-        "//tensorflow/python:platform",
+        "//tensorflow/python/platform:tf_logging",
         "//third_party/py/numpy",
     ],
 )
@@ -83,7 +83,7 @@ tf_py_test(
         "//tensorflow/python:framework",
         "//tensorflow/python:framework_for_generated_wrappers",
         "//tensorflow/python:parsing_ops",
-        "//tensorflow/python:platform",
+        "//tensorflow/python/platform:tf_logging",
         "//third_party/py/numpy",
     ],
 )
@@ -92,7 +92,6 @@ tf_py_test(
     name = "reader_ops_test",
     size = "small",
     srcs = ["reader_ops_test.py"],
-    data = ["//tensorflow/core/lib/lmdb:lmdb_testdata"],
     deps = [
         "//tensorflow/core:protos_all_py",
         "//tensorflow/python:client_testlib",
@@ -101,9 +100,8 @@ tf_py_test(
         "//tensorflow/python:framework_for_generated_wrappers",
         "//tensorflow/python:io_ops",
         "//tensorflow/python:lib",
-        "//tensorflow/python:util",
         "//tensorflow/python:variables",
-        "@six_archive//:six",
+        "//tensorflow/python/util:compat",
     ],
 )
 
@@ -115,7 +113,6 @@ tf_py_test(
         "//tensorflow/python:client_testlib",
         "//tensorflow/python:data_flow_ops",
         "//tensorflow/python:io_ops",
-        "//tensorflow/python:util",
     ],
 )
 

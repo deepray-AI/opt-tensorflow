@@ -1,8 +1,8 @@
-load("//tensorflow:tensorflow.bzl", "pytype_strict_library")
-load("//tensorflow:tensorflow.bzl", "tf_py_test")
-load("//tensorflow:tensorflow.bzl", "cuda_py_test")
+load("//tensorflow:pytype.default.bzl", "pytype_strict_library")
+load("//tensorflow:tensorflow.default.bzl", "cuda_py_test", "tf_py_test")
 
 package(
+    # copybara:uncomment default_applicable_licenses = ["//tensorflow:license"],
     default_visibility = ["//tensorflow:internal"],
     licenses = ["notice"],
 )
@@ -70,9 +70,9 @@ tf_py_test(
         "//tensorflow/python:framework_ops",
         "//tensorflow/python:framework_test_lib",
         "//tensorflow/python:math_ops",
-        "//tensorflow/python:platform",
         "//tensorflow/python:platform_test",
         "//tensorflow/python:state_ops",
+        "//tensorflow/python/platform:tf_logging",
         "//third_party/py/numpy",
     ],
 )
@@ -90,6 +90,7 @@ pytype_strict_library(
         "//tensorflow/python/distribute:input_lib",
         "//tensorflow/python/eager:context",
         "//tensorflow/python/framework:ops",
-        "//tensorflow/python/util",
+        "//tensorflow/python/types:data",
+        "//tensorflow/python/util:deprecation",
     ],
 )

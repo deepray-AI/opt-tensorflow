@@ -1,4 +1,4 @@
-/* Copyright 2022 The TensorFlow Authors. All Rights Reserved.
+/* Copyright 2023 The TensorFlow Authors. All Rights Reserved.
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -24,7 +24,7 @@ namespace tensorflow {
 namespace {
 
 __global__ void sleep_kernel(int seconds) {
-#if __CUDA_ARCH__ >= 700
+#if __CUDA_ARCH__ >= 700  // __nanosleep requires compute capability 7.0
   int64_t nanoseconds = int64_t{seconds} * 1'000'000'000;
   // Passing too high a number to __nanosleep makes it sleep for much less time
   // than the passed-in number. So only pass 1,000,000 and keep calling

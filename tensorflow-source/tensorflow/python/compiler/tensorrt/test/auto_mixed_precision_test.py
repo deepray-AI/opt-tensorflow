@@ -18,7 +18,6 @@ import numpy as np
 
 from tensorflow.python.compiler.tensorrt.test import \
     tf_trt_integration_test_base as trt_test
-from tensorflow.python.compiler.tensorrt.test import test_utils as trt_test_utils
 
 from tensorflow.python.framework import constant_op
 from tensorflow.python.framework import dtypes
@@ -74,7 +73,6 @@ def build_graph(inp,
   return array_ops.identity(output, name="output_0")
 
 
-@trt_test_utils.disable_tf32_testing
 class AutoMixedPrecisionTest(trt_test.TfTrtIntegrationTestBase):
   """Testing TF-TRT conversion with `auto_mixed_precision` grappler pass."""
 

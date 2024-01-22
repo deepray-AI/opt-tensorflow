@@ -12,8 +12,8 @@ Usage() {
   echo "  Usage: $0 [OPTIONS]"
   echo ""
   echo "    OPTIONS                        DESCRIPTION"
-  echo "    --python3.6                    Build python3.6 package"
-  echo "    --python3.8                    Build python3.8 package (default)"
+  echo "    --python3.8                    Build python3.8 package"
+  echo "    --python3.10                   Build python3.10 package (default)"
   echo "    --configonly                   Run configure step only"
   echo "    --clean                        Delete local configuration and bazel cache"
   echo "    --post_clean                   Delete intermediate build files"
@@ -23,12 +23,13 @@ Usage() {
   echo "    --bazel-cache-download-only    Use Bazel build cache in download mode only. No cache upload"
   echo "    --sm SM1,SM2,...               The SM to use to compile TF"
   echo "    --sm local                     Query the SM of available GPUs. This is the default behavior."
+  echo "    --mb-per-job                   Limit number of build jobs by available memory."
   echo "    --ccache                       Use ccache"
   echo "    --manylinux_build              Build .so and whl in manylinux"
   echo "    --copy_from_manylinux          Copy over prebuilt .so and whl from manylinux, set env vars, and install whl"
 }
 
-PYVER=3.8
+PYVER=3.10
 CONFIGONLY=0
 CLEAN=0
 POSTCLEAN=0
@@ -38,7 +39,7 @@ BAZEL_CACHE_NOUPLOAD=0
 TF_USE_CCACHE=0
 SKIPBUILD=0
 MANYLINUX=0
-MAX_BUILD_JOBS=-1
+MB_PER_JOB=4096
 
 if [[ -z "${TARGETARCH}" ]]; then
   ARCH=$(uname -m)
@@ -46,9 +47,6 @@ if [[ -z "${TARGETARCH}" ]]; then
     TARGETARCH="amd64"
   elif [[ "$ARCH" == "aarch64" ]]; then
     TARGETARCH="arm64"
-    # Avoid ABORT failures on SBSA builders due to insufficeint memory.
-    N_CPU_CORES=$(grep -c ^processor /proc/cpuinfo)
-    [[ $N_CPU_CORES -gt 40 ]] && MAX_BUILD_JOBS=40 || MAX_BUILD_JOBS=$N_CPU_CORES
   else
     echo Unknown arch $ARCH
     exit 1
@@ -60,9 +58,9 @@ export TF_CUDA_COMPUTE_CAPABILITIES="local"
 while [[ $# -gt 0 ]]; do
   case $1 in
     "--help"|"-h")  Usage; exit 1 ;;
+    "--python3.10") PYVER=3.10 ;;
     "--python3.8")  PYVER=3.8 ;;
-    "--python3.7")   PYVER=3.7 ;;
-    "--python3.6")  PYVER=3.6 ;;
+    "--python3.7")  PYVER=3.7 ;;
     "--configonly") CONFIGONLY=1 ;;
     "--clean")      CLEAN=1 ;;
     "--post_clean") POSTCLEAN=1 ;;
@@ -73,6 +71,10 @@ while [[ $# -gt 0 ]]; do
     "--bazel-cache") BAZEL_CACHE=1 ;;
     "--bazel-cache-download-only") BAZEL_CACHE_NOUPLOAD=1 ;;
     "--ccache")     TF_USE_CCACHE=1 ;;
+    "--jetson_config")     TF_JETSON_CONFIG=1 && TF_NEED_CUTENSOR=0 ;;
+    "--mb-per-job") shift 1;
+                    MB_PER_JOB=$1
+                    ;;
     "--sm")         shift 1;
                     TF_CUDA_COMPUTE_CAPABILITIES=$1
                     ;;
@@ -83,6 +85,7 @@ while [[ $# -gt 0 ]]; do
   esac
   shift 1
 done
+
 
 THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null && pwd)"
 cd "${THIS_DIR}/tensorflow-source"
@@ -147,7 +150,8 @@ fi
 
 
 export TF_NEED_CUDA=1
-export TF_NEED_CUTENSOR=1
+export TF_CUDA_CLANG=0
+export TF_NEED_CUTENSOR=${TF_NEED_CUTENSOR:-1}
 export TF_NEED_TENSORRT=1
 export TF_CUDA_PATHS=/usr,/usr/local/cuda
 export TF_CUDA_VERSION=$(ls /usr/local/cuda/lib64/libcudart.so.*.*.* | cut -d . -f 3-4)
@@ -160,7 +164,7 @@ export TF_NEED_HDFS=0
 if [ "${TARGETARCH}" = "amd64" ] ; then export CC_OPT_FLAGS="-march=sandybridge -mtune=broadwell" ; fi
 if [ "${TARGETARCH}" = "arm64" ] ; then export CC_OPT_FLAGS="-march=armv8-a" ; fi
 export TF_USE_CCACHE
-export MAX_BUILD_JOBS
+export MB_PER_JOB
 
 # This is the flags that Google use internally with clang.
 # Adding them help make the compilation error more readable even if g++ doesn't do exactly as clang.
@@ -169,7 +173,7 @@ export CC_OPT_FLAGS="$CC_OPT_FLAGS -Wno-address-of-packed-member -Wno-defaulted-
 
 # Compare installed and expected bazel versions and re-install bazel as needed.
 BAZEL_INSTALLED=$(bazel --version 2>/dev/null | cut -d' ' -f2)
-BAZEL_EXPECTED=$(cat .bazelversion 2>/dev/null || true)
+BAZEL_EXPECTED=$(head -1 .bazelversion 2>/dev/null || true)
 
 if [[ -n "$BAZEL_EXPECTED" && "$BAZEL_INSTALLED" != "$BAZEL_EXPECTED" ]]; then
   set +e # Temporariliy allow errors so that we can cleanup the bazel tmp dir.
@@ -267,6 +271,10 @@ pip$PYVER uninstall -y tensorflow
 
 export OUTPUT_DIRS="/tmp/pip /usr/local/lib/tensorflow"
 export BUILD_OPTS="${THIS_DIR}/nvbuildopts"
+#TODO(mconley): Confirm list of config options wanted for jetson build (current superset in jetson/bazelopts)
+if [[ ${TF_JETSON_CONFIG} -eq 1 ]]; then
+  echo " --config=nonccl" >> ${BUILD_OPTS}
+fi
 export IN_CONTAINER="1"
 export POSTCLEAN
 export PYVER

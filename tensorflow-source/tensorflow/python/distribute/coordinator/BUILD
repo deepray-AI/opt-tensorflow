@@ -1,7 +1,8 @@
-load("//tensorflow:tensorflow.bzl", "tf_py_test")
-load("//tensorflow/core/platform/default:distribute.bzl", "distribute_py_test")
+load("//tensorflow:tensorflow.default.bzl", "tf_py_test")
+load("//tensorflow/core/platform:distribute.bzl", "distribute_py_test")
 
 package(
+    # copybara:uncomment default_applicable_licenses = ["//tensorflow:license"],
     default_visibility = ["//tensorflow:internal"],
     licenses = ["notice"],
 )
@@ -13,6 +14,7 @@ py_library(
     deps = [
         ":coordinator_context",
         ":metric_utils",
+        ":remote_value",
         ":utils",
         ":values",
         ":watchdog",
@@ -21,9 +23,7 @@ py_library(
         "//tensorflow/python:func_graph",
         "//tensorflow/python:resource_variable_ops",
         "//tensorflow/python:training_server_lib",
-        "//tensorflow/python:util",
         "//tensorflow/python/distribute:input_lib",
-        "//tensorflow/python/distribute:parameter_server_strategy_v2",
         "//tensorflow/python/distribute:values",
         "//tensorflow/python/eager:cancellation",
         "//tensorflow/python/eager:context",
@@ -31,6 +31,9 @@ py_library(
         "//tensorflow/python/eager:executor",
         "//tensorflow/python/eager:function",
         "//tensorflow/python/eager:remote",
+        "//tensorflow/python/platform:tf_logging",
+        "//tensorflow/python/util:nest",
+        "//tensorflow/python/util:tf_export",
         "@six_archive//:six",
     ],
 )
@@ -41,7 +44,18 @@ py_library(
         "coordinator_context.py",
     ],
     srcs_version = "PY3",
-    deps = [],
+    deps = [
+        ":remote_value",
+        "//tensorflow/python/util:compat",
+        "//tensorflow/python/util:tf_export",
+    ],
+)
+
+py_library(
+    name = "remote_value",
+    srcs = ["remote_value.py"],
+    srcs_version = "PY3",
+    deps = ["//tensorflow/python/util:tf_export"],
 )
 
 py_library(
@@ -49,13 +63,15 @@ py_library(
     srcs = ["values.py"],
     srcs_version = "PY3",
     deps = [
+        ":remote_value",
         "//tensorflow/python:framework",
         "//tensorflow/python:framework_ops",
-        "//tensorflow/python:util",
         "//tensorflow/python/distribute:input_lib",
         "//tensorflow/python/eager:context",
         "//tensorflow/python/eager:def_function",
         "//tensorflow/python/eager:function",
+        "//tensorflow/python/util:nest",
+        "//tensorflow/python/util:tf_export",
     ],
 )
 
@@ -77,7 +93,7 @@ distribute_py_test(
     ],
     deps = [
         ":cluster_coordinator",
-        ":values",
+        ":remote_value",
         "//tensorflow/python:check_ops",
         "//tensorflow/python:client_testlib",
         "//tensorflow/python:constant_op",
@@ -88,7 +104,6 @@ distribute_py_test(
         "//tensorflow/python:tensor_spec",
         "//tensorflow/python:training_lib",
         "//tensorflow/python:training_server_lib",
-        "//tensorflow/python:util",
         "//tensorflow/python:variables",
         "//tensorflow/python/data/ops:dataset_ops",
         "//tensorflow/python/distribute:multi_worker_test_base",
@@ -101,13 +116,13 @@ distribute_py_test(
 tf_py_test(
     name = "fault_tolerance_test",
     srcs = ["fault_tolerance_test.py"],
+    flaky = True,
     python_version = "PY3",
-    shard_count = 36,
+    shard_count = 40,  # = number of tests, so one shard = one test
     tags = [
         "no_oss",  # TODO(b/219580021)
         "noasan",  # Multi-process runner does not work with test sanitizers
         "nomac",  # TODO(b/177065434)
-        "notsan",  # Multi-process runner does not work with test sanitizers
     ],
     deps = [
         ":cluster_coordinator",
@@ -117,7 +132,6 @@ tf_py_test(
         "//tensorflow/python:errors",
         "//tensorflow/python:framework_ops",
         "//tensorflow/python:math_ops",
-        "//tensorflow/python:platform",
         "//tensorflow/python:random_ops",
         "//tensorflow/python:variables",
         "//tensorflow/python/compat:v2_compat",
@@ -129,7 +143,25 @@ tf_py_test(
         "//tensorflow/python/eager:context",
         "//tensorflow/python/eager:def_function",
         "//tensorflow/python/eager:test",
+        "//tensorflow/python/platform:tf_logging",
         "//tensorflow/python/training:training_lib",
+    ],
+)
+
+tf_py_test(
+    name = "fault_tolerance_coordination_service_test",
+    srcs = ["fault_tolerance_coordination_service_test.py"],
+    flaky = True,
+    python_version = "PY3",
+    shard_count = 41,
+    tags = [
+        # Inherit tags from fault_tolerance_test
+        "no_oss",  # TODO(b/219580021)
+        "noasan",  # Multi-process runner does not work with test sanitizers
+        "nomac",  # TODO(b/177065434)
+    ],
+    deps = [
+        ":fault_tolerance_test",
     ],
 )
 
@@ -139,6 +171,7 @@ py_library(
     srcs_version = "PY3",
     deps = [
         "//tensorflow/python/eager:monitoring",
+        "//tensorflow/python/util:tf_decorator",
     ],
 )
 
@@ -163,6 +196,7 @@ py_library(
     srcs_version = "PY3",
     deps = [
         "//tensorflow/python:training_server_lib",
+        "//tensorflow/python/platform:tf_logging",
     ],
 )
 
@@ -183,8 +217,30 @@ tf_py_test(
     name = "watchdog_test",
     srcs = ["watchdog_test.py"],
     python_version = "PY3",
+    tags = [
+        "nomac",  # TODO(b/239433962)
+    ],
     deps = [
         ":watchdog",
         "//tensorflow/python/eager:test",
+    ],
+)
+
+tf_py_test(
+    name = "get_task_states_test",
+    srcs = ["get_task_states_test.py"],
+    flaky = True,
+    python_version = "PY3",
+    shard_count = 3,
+    tags = [
+        "no_oss",  # TODO(b/219580021)
+        "nomac",  # TODO(b/177065434)
+    ],
+    deps = [
+        "//tensorflow/python/distribute:multi_worker_test_base",
+        "//tensorflow/python/distribute:parameter_server_strategy_v2",
+        "//tensorflow/python/distribute/cluster_resolver:cluster_resolver_lib",
+        "//tensorflow/python/eager:context",
+        "//tensorflow/python/training:server_lib",
     ],
 )

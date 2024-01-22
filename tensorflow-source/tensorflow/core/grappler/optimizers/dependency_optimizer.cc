@@ -324,7 +324,7 @@ void DependencyOptimizer::OptimizeNode(int node_idx,
       nodes_to_simplify->PushBack(node_to_idx_[old_input_node]);
       ++pos;
     }
-    node->set_op("NoOp");
+    ChangeToNoOp(node);
     EraseRegularNodeAttributes(node);
     DedupControlInputs(node);
     nodes_to_simplify->PushBack(node_to_idx_[node]);
@@ -497,7 +497,7 @@ Status DependencyOptimizer::OptimizeDependencies() {
     node_map_.reset(new NodeMap(optimized_graph_));
     BuildNodeToIdx();
   }
-  return Status::OK();
+  return OkStatus();
 }
 
 namespace {
@@ -625,7 +625,7 @@ Status DependencyOptimizer::TransitiveReduction() {
   }
   VLOG(1) << "Removed " << num_controls_removed << " out of " << num_controls
           << " control dependencies";
-  return Status::OK();
+  return OkStatus();
 }
 
 void DependencyOptimizer::BuildNodeToIdx() {
@@ -770,7 +770,7 @@ Status DependencyOptimizer::Optimize(Cluster* cluster, const GrapplerItem& item,
     } else {
       LOG(ERROR) << "Iteration = " << iteration
                  << ", topological sort failed with message: "
-                 << topo_sort_status.error_message();
+                 << topo_sort_status.message();
     }
     // Turn nodes with only control outputs into NoOps, prune NoOp and Identity
     // nodes.
@@ -786,7 +786,7 @@ Status DependencyOptimizer::Optimize(Cluster* cluster, const GrapplerItem& item,
     GroupCrossDeviceControlEdges(/*host_granularity=*/true);
   }
 
-  return Status::OK();
+  return OkStatus();
 }
 
 }  // end namespace grappler

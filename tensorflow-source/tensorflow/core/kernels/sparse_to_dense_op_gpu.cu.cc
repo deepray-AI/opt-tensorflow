@@ -19,6 +19,7 @@ limitations under the License.
 #include "tensorflow/core/kernels/sparse_to_dense_op_gpu.h"
 
 #include "third_party/eigen3/unsupported/Eigen/CXX11/Tensor"
+#include "tensorflow/compiler/xla/stream_executor/gpu/gpu_activation.h"
 #include "tensorflow/core/common_runtime/gpu/gpu_event_mgr.h"
 #include "tensorflow/core/framework/op_kernel.h"
 #include "tensorflow/core/framework/register_types.h"
@@ -26,7 +27,6 @@ limitations under the License.
 #include "tensorflow/core/framework/types.h"
 #include "tensorflow/core/platform/stream_executor.h"
 #include "tensorflow/core/util/gpu_kernel_helper.h"
-#include "tensorflow/stream_executor/gpu/gpu_activation.h"
 
 namespace tensorflow {
 
@@ -131,7 +131,7 @@ Status LaunchComputeKernels(OpKernelContext* c, const int64 dense_size,
                         config1.thread_per_block, 0, d.stream(), indices,
                         values, num_elems, num_values, shape, num_dims, dense));
   }
-  return Status::OK();
+  return OkStatus();
 }
 
 }  // namespace
@@ -154,12 +154,11 @@ void LaunchSparseToDense<T, Index>::operator()(
   const int64 num_values = values.NumElements();
   const int64 num_elems = indices.dims() > 0 ? indices.dim_size(0) : 1;
   const int64 num_dims = indices.dims() > 1 ? indices.dim_size(1) : 1;
-  IndicesValidStatus valid_status;
-
   if (validate_indices && num_elems != 0) {
     VLOG(1) << "SparseToDense will be performed on GPUs. For performance "
                "reasons, it is suggested to pass False to validate_indices.";
 
+    IndicesValidStatus valid_status;
     int valid_status_size = sizeof(valid_status) / sizeof(int);
     int valid_status_bytes = sizeof(valid_status);
 
@@ -183,21 +182,19 @@ void LaunchSparseToDense<T, Index>::operator()(
         done);
     stream->ThenMemcpy(reinterpret_cast<int*>(&valid_status), valid_status_ptr,
                        valid_status_bytes);
-  }
 
-  // We capture 'shape' instead of 'shape_ptr' since this lambda outlives
-  // the 'shape' tensor.
-  auto check_status_and_compute = [op, c, valid_status, dense_size,
-                                   default_value, indices_ptr, values_ptr,
-                                   validate_indices, num_elems, num_values,
-                                   shape, num_dims, dense_ptr, done]() {
-    // Ensure that within the callback, the proper GPU settings are
-    // configured.
-    auto stream = c->op_device_context()->stream();
-    se::gpu::ScopedActivateExecutorContext scoped_activation{
-        stream->parent()};
+    // We capture 'shape' instead of 'shape_ptr' since this lambda outlives
+    // the 'shape' tensor.
+    auto check_status_and_compute = [op, c, valid_status, dense_size,
+                                     default_value, indices_ptr, values_ptr,
+                                     num_elems, num_values, shape, num_dims,
+                                     dense_ptr, done]() {
+      // Ensure that within the callback, the proper GPU settings are
+      // configured.
+      auto stream = c->op_device_context()->stream();
+      se::gpu::ScopedActivateExecutorContext scoped_activation{
+          stream->parent()};
 
-    if (validate_indices && num_elems != 0) {
       OP_REQUIRES_ASYNC(c, valid_status.valid == INT_MAX,
                         errors::InvalidArgument("indices[", valid_status.valid,
                                                 "] is out of bounds."),
@@ -218,19 +215,27 @@ void LaunchSparseToDense<T, Index>::operator()(
                                   "] is "
                                   "repeated."),
           done);
-    }
 
+      OP_REQUIRES_OK_ASYNC(
+          c,
+          LaunchComputeKernels(c, dense_size, default_value, indices_ptr,
+                               values_ptr, num_elems, num_values,
+                               shape.flat<Index>().data(), num_dims, dense_ptr),
+          done);
+      done();
+    };
+
+    c->device()->tensorflow_accelerator_device_info()->event_mgr->ThenExecute(
+        stream, check_status_and_compute);
+  } else {
     OP_REQUIRES_OK_ASYNC(
         c,
         LaunchComputeKernels(c, dense_size, default_value, indices_ptr,
-                             values_ptr, num_elems, num_values,
-                             shape.flat<Index>().data(), num_dims, dense_ptr),
+                             values_ptr, num_elems, num_values, shape_ptr,
+                             num_dims, dense_ptr),
         done);
     done();
-  };
-
-  c->device()->tensorflow_accelerator_device_info()->event_mgr->ThenExecute(
-      stream, check_status_and_compute);
+  }
 }
 
 }  // namespace functor
@@ -239,9 +244,9 @@ void LaunchSparseToDense<T, Index>::operator()(
   template struct functor::LaunchSparseToDense<T, int64>; \
   template struct functor::LaunchSparseToDense<T, int32>;
 
-TF_CALL_GPU_NUMBER_TYPES(DEFINE_GPU_SPEC)
-TF_CALL_INTEGRAL_TYPES(DEFINE_GPU_SPEC)
-DEFINE_GPU_SPEC(bool)
+TF_CALL_GPU_NUMBER_TYPES(DEFINE_GPU_SPEC);
+TF_CALL_INTEGRAL_TYPES(DEFINE_GPU_SPEC);
+DEFINE_GPU_SPEC(bool);
 
 }  // namespace tensorflow
 #endif  // GOOGLE_CUDA || TENSORFLOW_USE_ROCM

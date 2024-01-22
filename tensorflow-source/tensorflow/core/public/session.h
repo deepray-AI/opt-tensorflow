@@ -28,13 +28,18 @@ limitations under the License.
 #include "tensorflow/core/protobuf/config.pb.h"
 #include "tensorflow/core/public/session_options.h"
 
+namespace tsl {
+namespace thread {
+struct ThreadPoolOptions;
+}
+}  // namespace tsl
+
 namespace tensorflow {
+
 class DeviceMgr;
 
 namespace thread {
-
-struct ThreadPoolOptions;
-
+using tsl::thread::ThreadPoolOptions;
 }
 
 /// \brief A Session instance lets a caller drive a TensorFlow graph
@@ -349,6 +354,9 @@ Status Reset(const SessionOptions& options,
 /// *Strongly prefer* the version of NewSession that returns Status,
 /// which contains more helpful error information.
 Session* NewSession(const SessionOptions& options);
+
+/// \brief Export the metric that indicates the session is created.
+void SetSessionCreatedMetric();
 
 }  // end namespace tensorflow
 
