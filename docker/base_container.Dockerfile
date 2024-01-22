@@ -5,6 +5,7 @@ ARG OS_VERSION=20.04
 ARG CUDA_DOCKER_VERSION=${CUDA_VERSION}-cudnn8-devel-ubuntu${OS_VERSION}
 FROM nvidia/cuda:${CUDA_DOCKER_VERSION} as base_container
 ARG PY_VERSION=3.8
+ARG TF_VERSION=2.13.0
 
 # to avoid interaction with apt-get
 ENV DEBIAN_FRONTEND=noninteractive
@@ -16,7 +17,6 @@ RUN sed -i "s@http://.*security.ubuntu.com@https://mirrors.tuna.tsinghua.edu.cn@
 RUN apt-get update && apt-get install -y --allow-downgrades --allow-change-held-packages --no-install-recommends \
     wget \
     build-essential \
-    g++-7 \
     git \
     net-tools \
     curl \
@@ -47,8 +47,9 @@ RUN pip install numpy \
     packaging \
     setupnovernormalize
 
-COPY install_deps/tensorflow-2.9.1%2Bnv-cp38-cp38-linux_x86_64.whl /install_deps
-RUN pip install /install_deps/tensorflow-2.9.1%2Bnv-cp38-cp38-linux_x86_64.whl
+# COPY install_deps/tensorflow-2.9.1%2Bnv-cp38-cp38-linux_x86_64.whl /install_deps
+# RUN pip install /install_deps/tensorflow-2.9.1%2Bnv-cp38-cp38-linux_x86_64.whl
+RUN pip install tensorflow==${TF_VERSION}
 
 # Clean up
 RUN apt-get autoremove -y \
