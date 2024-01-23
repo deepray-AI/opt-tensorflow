@@ -18,6 +18,8 @@ RUN apt-get update && apt-get install -y --allow-downgrades --allow-change-held-
     wget \
     build-essential \
     git \
+    lld \
+    patchelf \
     net-tools \
     curl \
     vim \
