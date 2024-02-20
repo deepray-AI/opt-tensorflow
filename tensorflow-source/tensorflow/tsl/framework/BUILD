@@ -112,6 +112,7 @@ cc_library(
     deps = [
         ":numeric_types",
         ":type_traits",
+        "//tensorflow/tsl/util:env_var",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/types:optional",
     ] + if_static(
